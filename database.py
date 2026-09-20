@@ -11,12 +11,13 @@ import config
 db_client = None
 db = None
 users_col = None
+profiles_col = None
 projects_col = None
 sessions_col = None
 signals_col = None
 
 async def init_db():
-    global db_client, db, users_col, projects_col, sessions_col, signals_col
+    global db_client, db, users_col, profiles_col, projects_col, sessions_col, signals_col
     if not config.MONGO_URI:
         print("[DATABASE] Warning: MONGO_URI not configured!")
         return False
@@ -25,23 +26,29 @@ async def init_db():
         db_client = AsyncIOMotorClient(config.MONGO_URI, maxIdleTimeMS=60000)
         db = db_client['yulya_bot_db']
         users_col = db['user_profiles']
+        profiles_col = db['studio_profiles']
         projects_col = db['studio_projects']
         sessions_col = db['studio_sessions']
         signals_col = db['studio_signals']
         
-        # 1. Projects indexes
+        # 1. Studio Profiles indexes
+        await profiles_col.create_index([("user_id", 1)], unique=True)
+        await profiles_col.create_index([("username", 1)])
+        await profiles_col.create_index([("login_id", 1)])
+        
+        # 2. Projects indexes
         await projects_col.create_index([("user_id", 1), ("slug", 1)], unique=True)
         await projects_col.create_index([("updated_at", -1)])
         await projects_col.create_index([("spectator_token", 1)], sparse=True)
         
-        # 2. Sessions indexes (TTL: 30 days)
+        # 3. Sessions indexes (TTL: 30 days)
         await sessions_col.create_index([("token", 1)], unique=True)
         try:
             await sessions_col.create_index([("created_at_dt", 1)], expireAfterSeconds=86400 * 30)
         except Exception:
             pass
 
-        # 3. Signals index (TTL: 10 minutes)
+        # 4. Signals index (TTL: 10 minutes)
         try:
             await signals_col.create_index([("created_at_dt", 1)], expireAfterSeconds=600)
         except Exception:
@@ -112,6 +119,215 @@ async def get_user_profile(user_id: int):
     if users_col is None:
         return None
     return await users_col.find_one({"user_id": int(user_id)})
+
+# --- Studio Profiles Management (Dedicated user profile & game tracking) ---
+
+async def save_or_update_profile(user_id: int, username: str, display_name: str = None, avatar: str = None) -> dict:
+    """
+    Maintains a distinct user profile in studio_profiles storing:
+    - user_id (numeric Discord ID)
+    - login_id (Discord login handle / identifier)
+    - username (Discord username / handle)
+    - profile_name (Profile name)
+    - display_name (Display name)
+    - avatar URL or hash
+    - game_names: array of all names of the games created by the user
+    - created_games: array of created game objects/slugs with titles, created dates, and stats
+    - created_at, updated_at
+    """
+    if profiles_col is None:
+        return None
+        
+    user_id_int = int(user_id)
+    clean_username = username.strip().lower()
+    clean_display = display_name or username
+    now = datetime.now(timezone.utc)
+    
+    existing = await profiles_col.find_one({"user_id": user_id_int})
+    if existing:
+        existing_games = existing.get("created_games", [])
+        existing_game_names = existing.get("game_names") or [g.get("title", g.get("slug")) for g in existing_games]
+        
+        update_fields = {
+            "login_id": clean_username,
+            "username": clean_username,
+            "profile_name": clean_display,
+            "display_name": clean_display,
+            "game_names": existing_game_names,
+            "updated_at": now
+        }
+        if avatar is not None:
+            update_fields["avatar"] = avatar
+            
+        await profiles_col.update_one(
+            {"user_id": user_id_int},
+            {"$set": update_fields}
+        )
+        existing.update(update_fields)
+        existing["_id"] = str(existing.get("_id", ""))
+        return existing
+    else:
+        new_profile = {
+            "user_id": user_id_int,
+            "login_id": clean_username,
+            "username": clean_username,
+            "profile_name": clean_display,
+            "display_name": clean_display,
+            "avatar": avatar,
+            "game_names": [],
+            "created_games": [],
+            "created_at": now,
+            "updated_at": now
+        }
+        res = await profiles_col.insert_one(new_profile)
+        new_profile["_id"] = str(res.inserted_id)
+        return new_profile
+
+async def get_profile_by_user_id(user_id: int) -> dict | None:
+    """Retrieves a studio profile record by user_id."""
+    if profiles_col is None:
+        return None
+    doc = await profiles_col.find_one({"user_id": int(user_id)})
+    if doc:
+        doc["_id"] = str(doc.get("_id", ""))
+    return doc
+
+# Alias for backward compatibility / clarity
+get_studio_profile = get_profile_by_user_id
+
+async def get_profile_by_username(username: str) -> dict | None:
+    """Retrieves a studio profile record by username or login_id (case-insensitive)."""
+    if profiles_col is None:
+        return None
+    clean = username.strip().lower()
+    doc = await profiles_col.find_one({"$or": [{"username": clean}, {"login_id": clean}]})
+    if not doc and projects_col is not None:
+        # Check if existing projects can seed/backfill the studio profile
+        cursor = projects_col.find({"username": clean}).sort("updated_at", -1)
+        projs = await cursor.to_list(length=100)
+        if projs:
+            first_proj = projs[0]
+            user_id = first_proj["user_id"]
+            created_games = []
+            game_names = []
+            for p in projs:
+                g_title = p.get("title") or p.get("slug")
+                game_names.append(g_title)
+                created_games.append({
+                    "slug": p.get("slug"),
+                    "title": g_title,
+                    "description": p.get("description", ""),
+                    "tags": p.get("tags", []),
+                    "created_at": p.get("created_at", datetime.now(timezone.utc)).isoformat() if isinstance(p.get("created_at"), datetime) else str(p.get("created_at", "")),
+                    "updated_at": p.get("updated_at", datetime.now(timezone.utc)).isoformat() if isinstance(p.get("updated_at"), datetime) else str(p.get("updated_at", "")),
+                    "views": 0,
+                    "plays": 0
+                })
+            now = datetime.now(timezone.utc)
+            doc = {
+                "user_id": int(user_id),
+                "login_id": clean,
+                "username": clean,
+                "profile_name": clean,
+                "display_name": clean,
+                "avatar": None,
+                "game_names": game_names,
+                "created_games": created_games,
+                "created_at": now,
+                "updated_at": now
+            }
+            res = await profiles_col.insert_one(doc)
+            doc["_id"] = str(res.inserted_id)
+            return doc
+    if doc:
+        doc["_id"] = str(doc.get("_id", ""))
+    return doc
+
+async def sync_project_to_profile(user_id: int, username: str, project_doc: dict) -> bool:
+    """Syncs created game information and game_names into the user's studio_profiles record."""
+    if profiles_col is None:
+        return False
+    user_id_int = int(user_id)
+    clean_username = username.strip().lower()
+    safe_slug = project_doc["slug"]
+    game_title = project_doc.get("title", safe_slug)
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+    
+    profile = await profiles_col.find_one({"user_id": user_id_int})
+    if not profile:
+        game_entry = {
+            "slug": safe_slug,
+            "title": game_title,
+            "description": project_doc.get("description", ""),
+            "tags": project_doc.get("tags", ["game", "canvas"]),
+            "created_at": now_iso,
+            "updated_at": now_iso,
+            "views": 0,
+            "plays": 0
+        }
+        await profiles_col.insert_one({
+            "user_id": user_id_int,
+            "login_id": clean_username,
+            "username": clean_username,
+            "profile_name": clean_username,
+            "display_name": clean_username,
+            "avatar": None,
+            "game_names": [game_title],
+            "created_games": [game_entry],
+            "created_at": now,
+            "updated_at": now
+        })
+        return True
+        
+    created_games = profile.get("created_games", [])
+    found = False
+    for g in created_games:
+        if g.get("slug") == safe_slug:
+            g["title"] = game_title
+            g["description"] = project_doc.get("description", g.get("description", ""))
+            g["tags"] = project_doc.get("tags", g.get("tags", ["game", "canvas"]))
+            g["updated_at"] = now_iso
+            found = True
+            break
+            
+    if not found:
+        created_games.append({
+            "slug": safe_slug,
+            "title": game_title,
+            "description": project_doc.get("description", ""),
+            "tags": project_doc.get("tags", ["game", "canvas"]),
+            "created_at": now_iso,
+            "updated_at": now_iso,
+            "views": 0,
+            "plays": 0
+        })
+        
+    game_names = [g.get("title", g.get("slug")) for g in created_games]
+    await profiles_col.update_one(
+        {"user_id": user_id_int},
+        {"$set": {"created_games": created_games, "game_names": game_names, "updated_at": now}}
+    )
+    return True
+
+async def remove_project_from_profile(user_id: int, slug: str) -> bool:
+    """Removes a game entry and updates game_names in studio_profiles when a project is deleted."""
+    if profiles_col is None:
+        return False
+    user_id_int = int(user_id)
+    safe_slug = re.sub(r'[^a-zA-Z0-9_-]', '', slug).lower()
+    now = datetime.now(timezone.utc)
+    
+    profile = await profiles_col.find_one({"user_id": user_id_int})
+    if profile:
+        created_games = [g for g in profile.get("created_games", []) if g.get("slug") != safe_slug]
+        game_names = [g.get("title", g.get("slug")) for g in created_games]
+        await profiles_col.update_one(
+            {"user_id": user_id_int},
+            {"$set": {"created_games": created_games, "game_names": game_names, "updated_at": now}}
+        )
+        return True
+    return False
 
 async def save_user_api_key(user_id: int, api_key: str, username: str = None) -> dict:
     """
@@ -237,6 +453,12 @@ async def save_project(
         {"$set": project_doc, "$setOnInsert": {"created_at": now}},
         upsert=True
     )
+    # Sync to studio_profiles collection
+    try:
+        await sync_project_to_profile(user_id, username, project_doc)
+    except Exception as e:
+        print(f"[DATABASE] Profile sync error: {e}")
+        
     return project_doc
 
 async def delete_project(user_id: int, slug: str):
@@ -245,6 +467,11 @@ async def delete_project(user_id: int, slug: str):
         return False
     safe_slug = re.sub(r'[^a-zA-Z0-9_-]', '', slug).lower()
     res = await projects_col.delete_one({"user_id": int(user_id), "slug": safe_slug})
+    # Remove from studio_profiles collection
+    try:
+        await remove_project_from_profile(user_id, safe_slug)
+    except Exception as e:
+        print(f"[DATABASE] Profile remove error: {e}")
     return res.deleted_count > 0
 
 async def list_community_arcade(limit: int = 50):

@@ -420,8 +420,8 @@
             You can launch your workspace below or run <code class="font-mono" style="background: rgba(139, 92, 246, 0.15); color: var(--accent-primary); padding: 2px 6px; border-radius: 4px;">/studio</code> in Discord anytime to get your link!
           </div>
         </div>
-        <a href="/studio" class="btn btn-primary btn-lg" style="width: 100%;">
-          Open Workspace
+        <a href="/{{ user.username if user else 'studio' }}" class="btn btn-primary btn-lg" style="width: 100%;">
+          View My Profile & Games
         </a>
       </div>
     {% endif %}
@@ -502,6 +502,11 @@
         if (data.success) {
           document.getElementById('formView').style.display = 'none';
           document.getElementById('successView').style.display = 'block';
+          if (data.redirect_url) {
+            setTimeout(() => {
+              window.location.href = data.redirect_url;
+            }, 1200);
+          }
         } else {
           showAlert(data.error || 'This Google AI Studio API key could not be verified.', 'error');
           btn.disabled = false;

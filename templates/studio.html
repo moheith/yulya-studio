@@ -205,15 +205,19 @@
     }
 
     .log-time { color: var(--text-tertiary); min-width: 65px; }
-    .log-badge { font-weight: 600; min-width: 70px; }
+    .log-badge { font-weight: 600; min-width: 80px; font-family: var(--font-code); font-size: 11px; text-transform: uppercase; }
     .log-badge.info { color: var(--accent-blue); }
     .log-badge.success { color: var(--accent-green); }
-    .log-badge.thinking { color: #d175ff; }
+    .log-badge.thinking { color: #c084fc; }
+    .log-badge.read_file { color: #38bdf8; }
+    .log-badge.replace_content { color: #fbbf24; }
+    .log-badge.pass { color: #34d399; font-weight: 700; }
+    .log-badge.fail { color: #f43f5e; font-weight: 700; }
     .log-badge.warning { color: var(--accent-amber); }
     .log-badge.error { color: var(--accent-rose); }
-    .log-badge.user { color: var(--text-primary); }
+    .log-badge.user { color: #f1f5f9; font-weight: 700; }
 
-    .log-msg { color: var(--text-primary); word-break: break-word; }
+    .log-msg { color: var(--text-primary); word-break: break-word; font-family: var(--font-code); }
 
     /* Preview Area */
     .preview-wrapper {
@@ -654,12 +658,21 @@
     let screenStream = null;
     let screenInterval = null;
 
-    function logTerminal(message, level = 'info') {
+    function logTerminal(message, level = 'info', customTime = null) {
       const feed = document.getElementById('terminalFeed');
       const now = new Date();
-      const timeStr = now.toTimeString().split(' ')[0];
+      const timeStr = customTime || now.toTimeString().split(' ')[0];
 
-      const item = { time: timeStr, level, message };
+      // Parse Antigravity step prefixes if embedded in message
+      const stepMatch = typeof message === 'string' ? message.match(/^\[([A-Z_]+)\]\s*(.*)$/) : null;
+      let stepTag = level;
+      let displayMsg = message;
+      if (stepMatch) {
+        stepTag = stepMatch[1].toLowerCase();
+        displayMsg = stepMatch[2];
+      }
+
+      const item = { time: timeStr, level: stepTag, message: displayMsg };
       terminalHistory.push(item);
 
       const line = document.createElement('div');
@@ -670,12 +683,12 @@
       timeSpan.textContent = timeStr;
 
       const badgeSpan = document.createElement('span');
-      badgeSpan.className = `log-badge ${level}`;
-      badgeSpan.textContent = level.toUpperCase();
+      badgeSpan.className = `log-badge ${stepTag}`;
+      badgeSpan.textContent = stepTag.toUpperCase();
 
       const msgSpan = document.createElement('span');
       msgSpan.className = 'log-msg';
-      msgSpan.textContent = message;
+      msgSpan.textContent = displayMsg;
 
       line.appendChild(timeSpan);
       line.appendChild(badgeSpan);
@@ -725,6 +738,20 @@
         if (data.success && data.files) {
           fileContents = data.files;
           if (activeTab !== 'terminal') displayCodeFile(activeTab);
+        }
+      } catch (e) {}
+    }
+
+    async function loadBuildLogs() {
+      try {
+        const res = await fetch(`/api/project-logs/${ACTIVE_SLUG}`);
+        const data = await res.json();
+        if (data.success && data.logs && data.logs.length > 0) {
+          const feed = document.getElementById('terminalFeed');
+          feed.innerHTML = '';
+          data.logs.forEach(item => {
+            logTerminal(item.message, item.step || 'info', item.time);
+          });
         }
       } catch (e) {}
     }
@@ -1229,6 +1256,7 @@
 
     // Startup
     loadProjectFiles();
+    loadBuildLogs();
     connectWS();
   </script>
 </body>

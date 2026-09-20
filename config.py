@@ -5,11 +5,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
-PROJECTS_DIR = BASE_DIR / "projects"
+PROJECTS_DIR = BASE_DIR / "data" / "projects"
 STATIC_DIR = BASE_DIR / "static"
 TEMPLATES_DIR = BASE_DIR / "templates"
 
-PROJECTS_DIR.mkdir(exist_ok=True)
+PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
 STATIC_DIR.mkdir(exist_ok=True)
 TEMPLATES_DIR.mkdir(exist_ok=True)
 

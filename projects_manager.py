@@ -4,6 +4,7 @@ import io
 import shutil
 import zipfile
 from pathlib import Path
+from datetime import datetime, timezone
 import config
 
 DANGEROUS_PATTERNS = [
@@ -35,27 +36,59 @@ def sanitize_game_code(content: str) -> tuple[str, list[str]]:
             sanitized = pattern.sub("/* blocked_security_rule */ null", sanitized)
     return sanitized, warnings
 
+PROTECTED_FILES = {
+    "profile.json", "user.json", "build.log", "database.py", "server.py",
+    "config.py", "ai_engine.py", "projects_manager.py", "test_suite.py", "requirements.txt"
+}
+
+DISALLOWED_EXTENSIONS = {
+    ".py", ".pyc", ".sh", ".bash", ".bat", ".cmd", ".ps1", ".exe", ".env", ".dll", ".so", ".bin"
+}
+
+ALLOWED_GAME_EXTENSIONS = {
+    ".html", ".css", ".js", ".json", ".svg", ".txt", ".csv", ".tsv", ".xml",
+    ".png", ".jpg", ".jpeg", ".webp", ".mp3", ".wav", ".ogg"
+}
+
 def get_user_project_dir(user_id: int, slug: str) -> Path:
     """
-    Resolves project path and strictly verifies it stays within config.PROJECTS_DIR.
-    Prevents path traversal attacks (Section 32).
+    Resolves project path and strictly verifies it stays within config.PROJECTS_DIR/{user_id}/{slug}.
+    Prevents path traversal attacks, directory escaping, and cross-project tampering.
     """
-    if ".." in slug or "/" in slug or "\\" in slug:
+    try:
+        user_id_int = int(user_id)
+        if user_id_int <= 0:
+            raise PermissionError("Invalid user ID: must be a positive integer.")
+    except (ValueError, TypeError):
+        raise PermissionError("Invalid user ID format.")
+
+    if not slug or not isinstance(slug, str):
+        raise PermissionError("Project slug is required.")
+        
+    # Strictly reject path traversal patterns
+    if any(p in slug for p in ["..", "/", "\\", "%", "\0", ":"]):
         raise PermissionError("Path traversal attempt detected in slug.")
         
     safe_slug = re.sub(r'[^a-zA-Z0-9_-]', '', slug).lower()
     if not safe_slug:
-        safe_slug = "game"
+        raise PermissionError("Invalid project slug: empty after sanitization.")
+
+    if safe_slug.upper() in {"CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "LPT1", "LPT2"}:
+        raise PermissionError(f"Reserved device name in slug: {safe_slug}")
         
     base_root = config.PROJECTS_DIR.resolve()
-    user_root = (base_root / str(int(user_id))).resolve()
+    user_root = (base_root / str(user_id_int)).resolve()
     project_dir = (user_root / safe_slug).resolve()
     
-    # Strict containment check
+    # Strict containment check - must be strictly inside user_root and base_root
     try:
         project_dir.relative_to(user_root)
+        project_dir.relative_to(base_root)
     except ValueError:
-        raise PermissionError("Path traversal attempt detected.")
+        raise PermissionError("Path traversal attempt detected: path escapes project repository.")
+        
+    if project_dir == user_root or project_dir == base_root:
+        raise PermissionError("Invalid project directory: cannot point to repository root.")
         
     project_dir.mkdir(parents=True, exist_ok=True)
     return project_dir
@@ -66,33 +99,54 @@ def get_project_size(project_dir: Path) -> int:
     if not project_dir.exists():
         return 0
     for p in project_dir.rglob("*"):
-        if p.is_file():
+        if p.is_file() and not p.is_symlink():
             total += p.stat().st_size
     return total
 
 def write_project_file(user_id: int, slug: str, filename: str, content: str) -> str:
     """
-    Writes a project file enforcing size limits and path sanitization.
+    Writes a project file enforcing strict path isolation, size limits, and security rules.
+    Guarantees that files cannot escape data/projects/{user_id}/{slug}/ or touch profiles/server files.
     """
-    if ".." in filename or "/" in filename or "\\" in filename:
+    if not filename or not isinstance(filename, str):
+        raise ValueError("Filename is required.")
+        
+    if any(p in filename for p in ["..", "/", "\\", "%", "\0", ":"]):
         raise PermissionError("Path traversal attempt detected in filename.")
         
     # Sanitize file name
     safe_name = os.path.basename(filename).strip()
+    if safe_name != filename:
+        raise PermissionError("Path traversal attempt detected: filename cannot contain path components.")
+        
     if not re.match(r'^[a-zA-Z0-9_.\-]+$', safe_name) or '..' in safe_name:
         raise ValueError(f"Invalid filename: {filename}")
+        
+    # Block protected or system files
+    if safe_name.startswith(".") or safe_name in PROTECTED_FILES:
+        raise PermissionError(f"Access denied: cannot modify protected file '{safe_name}'.")
+
+    # Block disallowed extensions
+    ext = Path(safe_name).suffix.lower()
+    if ext in DISALLOWED_EXTENSIONS or ext not in ALLOWED_GAME_EXTENSIONS:
+        raise PermissionError(f"Access denied: file '{safe_name}' has disallowed extension.")
         
     # File size check (Section 31: 512 KB per file)
     encoded = content.encode("utf-8")
     if len(encoded) > config.MAX_FILE_SIZE:
         raise ValueError(f"File {safe_name} exceeds the maximum allowed file size of 512 KB.")
         
-    pdir = get_user_project_dir(user_id, slug)
+    pdir = get_user_project_dir(user_id, slug).resolve()
     target = (pdir / safe_name).resolve()
     
-    # Traversal check
-    if not str(target).startswith(str(pdir)):
-        raise PermissionError("Path traversal detected in filename.")
+    # Traversal and symlink check
+    try:
+        target.relative_to(pdir)
+    except ValueError:
+        raise PermissionError("Path traversal detected: target is outside project directory.")
+        
+    if target.is_symlink() or os.path.islink(str(pdir / safe_name)):
+        raise PermissionError("Symlinks are strictly forbidden.")
         
     # Security check against dangerous parent escape patterns
     if safe_name.endswith((".html", ".js")):
@@ -110,29 +164,137 @@ def write_project_file(user_id: int, slug: str, filename: str, content: str) -> 
     return safe_name
 
 def read_project_file(user_id: int, slug: str, filename: str) -> str:
-    safe_name = os.path.basename(filename)
-    pdir = get_user_project_dir(user_id, slug)
+    """
+    Reads a file strictly from within the game project repository.
+    Rejects any traversal, symlink, or outside read.
+    """
+    if not filename or not isinstance(filename, str):
+        return ""
+        
+    if any(p in filename for p in ["..", "/", "\\", "%", "\0", ":"]):
+        raise PermissionError("Path traversal attempt detected in filename.")
+        
+    safe_name = os.path.basename(filename).strip()
+    if safe_name != filename:
+        raise PermissionError("Path traversal attempt detected in filename.")
+        
+    if not re.match(r'^[a-zA-Z0-9_.\-]+$', safe_name) or '..' in safe_name:
+        raise PermissionError(f"Invalid filename: {filename}")
+        
+    # Strictly block reading protected files or hidden files
+    if safe_name in PROTECTED_FILES or safe_name.startswith("."):
+        raise PermissionError(f"Access denied: cannot read protected file '{safe_name}'.")
+
+    ext = Path(safe_name).suffix.lower()
+    if ext in DISALLOWED_EXTENSIONS:
+        raise PermissionError(f"Access denied: cannot read file with disallowed extension '{safe_name}'.")
+
+    pdir = get_user_project_dir(user_id, slug).resolve()
     target = (pdir / safe_name).resolve()
-    if not str(target).startswith(str(pdir)) or not target.exists():
+    
+    try:
+        target.relative_to(pdir)
+    except ValueError:
+        raise PermissionError("Path traversal detected in filename.")
+        
+    if target.is_symlink() or os.path.islink(str(pdir / safe_name)):
+        raise PermissionError("Symlinks are strictly forbidden.")
+        
+    if not target.exists() or not target.is_file():
         return ""
     return target.read_text(encoding="utf-8", errors="replace")
 
 def list_project_files(user_id: int, slug: str) -> list:
-    pdir = get_user_project_dir(user_id, slug)
+    """Lists only valid game code files within the project repository."""
+    pdir = get_user_project_dir(user_id, slug).resolve()
     if not pdir.exists():
         return []
     files = []
     for item in pdir.iterdir():
-        if item.is_file():
-            files.append(item.name)
+        if item.is_file() and not item.is_symlink():
+            try:
+                item.resolve().relative_to(pdir)
+                fname = item.name
+                if fname == "build.log" or fname.startswith(".") or fname in PROTECTED_FILES:
+                    continue
+                ext = Path(fname).suffix.lower()
+                if ext in DISALLOWED_EXTENSIONS or ext not in ALLOWED_GAME_EXTENSIONS:
+                    continue
+                files.append(fname)
+            except ValueError:
+                continue
     return sorted(files)
 
 def get_project_all_files(user_id: int, slug: str) -> dict:
-    """Returns a dictionary of all standard files and their content."""
+    """Returns a dictionary of all game files within the repository."""
     files = {}
-    for fname in ["index.html", "style.css", "app.js"]:
-        files[fname] = read_project_file(user_id, slug, fname)
+    valid_files = set(list_project_files(user_id, slug))
+    for std_f in ["index.html", "style.css", "app.js"]:
+        valid_files.add(std_f)
+    for fname in sorted(valid_files):
+        try:
+            content = read_project_file(user_id, slug, fname)
+            if content or fname in ["index.html", "style.css", "app.js"]:
+                files[fname] = content
+        except Exception:
+            pass
     return files
+
+# --- Antigravity CLI Activity Log & Persistence (Section 4) ---
+
+def write_build_log(user_id: int, slug: str, step: str, message: str) -> None:
+    """
+    Persists an Antigravity CLI activity log entry into data/projects/{user_id}/{slug}/build.log
+    Steps: USER, THINKING, READ_FILE, REPLACE_CONTENT, PASS, FAIL
+    """
+    pdir = get_user_project_dir(user_id, slug).resolve()
+    log_file = (pdir / "build.log").resolve()
+    try:
+        log_file.relative_to(pdir)
+    except ValueError:
+        raise PermissionError("Invalid path for build log.")
+        
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    formatted_line = f"[{now_str}] [{step.upper()}] {message}\n"
+    with open(log_file, "a", encoding="utf-8", errors="replace") as f:
+        f.write(formatted_line)
+
+def read_build_log(user_id: int, slug: str, max_lines: int = 100) -> list[dict]:
+    """
+    Reads recent activity log entries from build.log for the studio terminal feed.
+    """
+    pdir = get_user_project_dir(user_id, slug).resolve()
+    log_file = (pdir / "build.log").resolve()
+    if not log_file.exists():
+        return []
+        
+    try:
+        log_file.relative_to(pdir)
+    except ValueError:
+        return []
+        
+    try:
+        lines = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
+        recent = lines[-max_lines:]
+        parsed = []
+        for line in recent:
+            # Parse line format: [2026-09-20 22:00:00] [STEP] Message
+            match = re.match(r'^\[(.*?)\]\s+\[(.*?)\]\s+(.*)$', line)
+            if match:
+                parsed.append({
+                    "time": match.group(1).split(" ")[-1],
+                    "step": match.group(2).lower(),
+                    "message": match.group(3)
+                })
+            else:
+                parsed.append({
+                    "time": "",
+                    "step": "info",
+                    "message": line
+                })
+        return parsed
+    except Exception:
+        return []
 
 def create_starter_game(user_id: int, username: str, slug: str, title: str):
     """
@@ -559,9 +721,30 @@ startBtn.addEventListener('click', startGame);
     return ["index.html", "style.css", "app.js"]
 
 def delete_project_dir(user_id: int, slug: str) -> bool:
+    try:
+        user_id_int = int(user_id)
+        if user_id_int <= 0:
+            return False
+    except (ValueError, TypeError):
+        return False
+
+    if not slug or any(p in slug for p in ["..", "/", "\\", "%", "\0", ":"]):
+        return False
     safe_slug = re.sub(r'[^a-zA-Z0-9_-]', '', slug).lower()
-    pdir = config.PROJECTS_DIR / str(int(user_id)) / safe_slug
-    if pdir.exists() and str(pdir.resolve()).startswith(str(config.PROJECTS_DIR.resolve())):
+    if not safe_slug:
+        return False
+    base_root = config.PROJECTS_DIR.resolve()
+    user_root = (base_root / str(user_id_int)).resolve()
+    pdir = (user_root / safe_slug).resolve()
+    try:
+        pdir.relative_to(user_root)
+        pdir.relative_to(base_root)
+        if pdir == user_root or pdir == base_root:
+            return False
+    except ValueError:
+        return False
+        
+    if pdir.exists():
         shutil.rmtree(pdir, ignore_errors=True)
         return True
     return False
@@ -571,7 +754,10 @@ def create_zip_archive(user_id: int, slug: str) -> io.BytesIO:
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
         for file_path in pdir.rglob("*"):
-            if file_path.is_file():
+            if file_path.is_file() and not file_path.is_symlink():
+                fname = file_path.name
+                if fname == "build.log" or fname.startswith(".") or fname in PROTECTED_FILES:
+                    continue
                 arcname = file_path.relative_to(pdir)
                 zf.write(file_path, arcname)
     zip_buffer.seek(0)

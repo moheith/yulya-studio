@@ -230,15 +230,34 @@ async def handle_auth_callback(request: web.Request) -> web.Response:
             async with client.get("https://discord.com/api/users/@me", headers=headers) as user_resp:
                 user_data = await user_resp.json()
                 
-        response = web.HTTPFound("/studio")
         if "id" in user_data:
             user_info = {
                 "id": int(user_data["id"]),
                 "username": user_data["username"],
+                "display_name": user_data.get("global_name") or user_data["username"],
                 "avatar": user_data.get("avatar")
             }
+            # Save or update dedicated studio_profiles document
+            try:
+                await database.save_or_update_profile(
+                    user_id=user_info["id"],
+                    username=user_info["username"],
+                    display_name=user_info["display_name"],
+                    avatar=user_info["avatar"]
+                )
+            except Exception as e:
+                print(f"[AUTH] Error updating studio profile: {e}")
+                
+            # If user already has an API key configured, route directly to their public profile
+            profile = await database.get_user_profile(user_info["id"])
+            if profile and profile.get("studio_api_key"):
+                response = web.HTTPFound(f"/{user_info['username']}")
+            else:
+                response = web.HTTPFound("/studio")
+                
             await set_session_user(response, user_info)
-        return response
+            return response
+        return web.HTTPFound("/studio")
     except Exception as e:
         print(f"[AUTH] OAuth error: {e}")
         return web.HTTPFound("/studio")
@@ -273,6 +292,8 @@ async def api_save_key(request: web.Request) -> web.Response:
         body = await request.json()
         key = body.get("api_key", "").strip()
         res = await database.save_user_api_key(user["id"], key, user["username"])
+        if res.get("success"):
+            res["redirect_url"] = f"/{user['username']}"
         status_code = 200 if res.get("success") else 400
         return web.json_response(res, status=status_code)
     except Exception as e:
@@ -354,10 +375,13 @@ async def api_modify_project(request: web.Request) -> web.Response:
         if not api_key:
             return web.json_response({"success": False, "error": "No Google AI Studio API key saved. Please set up your key first."}, status=400)
             
-        # Broadcast "thinking" log to connected WebSockets
-        await broadcast_project_log(slug, "Thinking... Google AI Studio is analyzing your project.", "thinking")
-        
-        result = await ai_engine.process_code_request(api_key, user["id"], user["username"], slug, prompt)
+        # Broadcast Antigravity CLI log steps to connected WebSockets
+        async def _log_callback(step_type, message_text):
+            await broadcast_project_log(slug, message_text, step_type)
+            
+        result = await ai_engine.process_code_request(
+            api_key, user["id"], user["username"], slug, prompt, log_callback=_log_callback
+        )
         
         if result.get("success"):
             # Hot-reload update to creator + spectators (Section 20)
@@ -367,9 +391,6 @@ async def api_modify_project(request: web.Request) -> web.Response:
                 "content": result["content"],
                 "timestamp": int(time.time())
             })
-            await broadcast_project_log(slug, f"Updated files: {result['summary']}", "success")
-        else:
-            await broadcast_project_log(slug, f"Failed: {result.get('error')}", "error")
             
         return web.json_response(result)
     except Exception as e:
@@ -492,13 +513,29 @@ async def handle_game_asset(request: web.Request) -> web.Response:
         
     # Strictly validate filename to prevent path traversal
     safe_name = os.path.basename(filename)
-    if not safe_name or ".." in safe_name:
+    if not safe_name or ".." in safe_name or "/" in filename or "\\" in filename:
         safe_name = "index.html"
         
-    pdir = projects_manager.get_user_project_dir(proj["user_id"], slug)
+    # Block protected files, build logs, hidden files, and disallowed extensions
+    if safe_name.startswith(".") or safe_name in projects_manager.PROTECTED_FILES:
+        return web.Response(text="Access denied", status=403)
+
+    ext = Path(safe_name).suffix.lower()
+    if ext in projects_manager.DISALLOWED_EXTENSIONS:
+        return web.Response(text="Access denied", status=403)
+        
+    pdir = projects_manager.get_user_project_dir(proj["user_id"], slug).resolve()
     target = (pdir / safe_name).resolve()
     
-    if not str(target).startswith(str(pdir)) or not target.exists() or not target.is_file():
+    try:
+        target.relative_to(pdir)
+    except ValueError:
+        return web.Response(text="Access denied", status=403)
+        
+    if target.is_symlink() or os.path.islink(str(target)):
+        return web.Response(text="Access denied: symlinks forbidden", status=403)
+        
+    if not target.exists() or not target.is_file():
         return web.Response(text="File not found", status=404)
         
     content_type = "text/html; charset=utf-8"
@@ -509,14 +546,132 @@ async def handle_game_asset(request: web.Request) -> web.Response:
     elif safe_name.endswith((".jpg", ".jpeg")): content_type = "image/jpeg"
     elif safe_name.endswith(".svg"): content_type = "image/svg+xml"
     
+    body_bytes = target.read_bytes()
+    is_iframe = (request.headers.get("Sec-Fetch-Dest") == "iframe") or (request.query.get("embed") == "1") or (request.query.get("raw") == "1")
+    
+    # If viewed directly in browser by owner, inject sleek "Edit in Studio" button
+    if safe_name == "index.html" and not is_iframe:
+        session_user = await get_session_user(request)
+        is_owner = (session_user is not None and (session_user.get("id") == proj.get("user_id") or session_user.get("username", "").lower() == username))
+        
+        if is_owner:
+            banner = f"""<div style="position:fixed;top:14px;right:14px;z-index:999999;display:flex;align-items:center;gap:10px;background:rgba(10,5,24,0.92);backdrop-filter:blur(10px);border:1px solid rgba(139,92,246,0.35);padding:6px 14px;border-radius:24px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:12px;box-shadow:0 6px 20px rgba(0,0,0,0.6);"><a href="/{username}" style="color:#9590a8;text-decoration:none;font-weight:500;">@{username}</a><span style="color:rgba(255,255,255,0.2);">|</span><a href="/{username}/{slug}/studio" style="color:#a78bfa;font-weight:600;text-decoration:none;display:flex;align-items:center;gap:4px;">Edit in Studio &rarr;</a></div>"""
+        else:
+            banner = f"""<div style="position:fixed;top:14px;right:14px;z-index:999999;display:flex;align-items:center;gap:10px;background:rgba(10,5,24,0.88);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.12);padding:6px 14px;border-radius:24px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:12px;box-shadow:0 6px 20px rgba(0,0,0,0.6);"><a href="/{username}" style="color:#38bdf8;font-weight:600;text-decoration:none;">@{username}'s Profile &rarr;</a></div>"""
+            
+        html_str = body_bytes.decode("utf-8", errors="replace")
+        if "</body>" in html_str:
+            html_str = html_str.replace("</body>", f"{banner}</body>")
+        else:
+            html_str += banner
+        body_bytes = html_str.encode("utf-8")
+        
     return web.Response(
-        body=target.read_bytes(),
+        body=body_bytes,
         content_type=content_type,
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate",
             "X-Content-Type-Options": "nosniff"
         }
     )
+
+# --- GitHub-Style Portfolio & Studio Repository Handlers (Section 1) ---
+
+RESERVED_USERNAMES = {"static", "api", "auth", "ws", "studio", "spectate", "favicon.ico"}
+
+async def handle_user_profile(request: web.Request) -> web.Response:
+    """User profile / portfolio page at /{username} (Section 1)"""
+    username = request.match_info["username"]
+    clean_username = username.strip().lower()
+    
+    if clean_username in RESERVED_USERNAMES:
+        return web.Response(text="Not found", status=404)
+        
+    session_user = await get_session_user(request)
+    profile = await database.get_profile_by_username(clean_username)
+    
+    if not profile:
+        # Check if logged in user is viewing their own profile
+        if session_user and session_user.get("username", "").lower() == clean_username:
+            profile = await database.save_or_update_profile(
+                user_id=session_user["id"],
+                username=clean_username,
+                display_name=session_user.get("display_name") or clean_username,
+                avatar=session_user.get("avatar")
+            )
+            
+    if not profile:
+        return web.Response(text=f"User @{username} not found.", status=404)
+        
+    is_owner = (session_user is not None and (session_user.get("id") == profile.get("user_id") or session_user.get("username", "").lower() == clean_username))
+    
+    games = profile.get("created_games", [])
+    if not games and database.projects_col is not None:
+        user_projects = await database.list_user_projects(profile.get("user_id", 0))
+        if user_projects:
+            games = [
+                {
+                    "slug": p.get("slug"),
+                    "title": p.get("title") or p.get("slug"),
+                    "description": p.get("description", ""),
+                    "tags": p.get("tags", []),
+                    "created_at": str(p.get("created_at", "")),
+                    "updated_at": str(p.get("updated_at", ""))
+                }
+                for p in user_projects
+            ]
+            
+    return await render_template("profile.html", {
+        "user": session_user,
+        "profile": profile,
+        "is_owner": is_owner,
+        "games": games
+    })
+
+async def handle_user_slug_studio(request: web.Request) -> web.Response:
+    """Creator IDE dual-pane workspace at /{username}/{slug}/studio"""
+    username = request.match_info["username"].lower()
+    slug = request.match_info["slug"].lower()
+    
+    session_user = await get_session_user(request)
+    if not session_user:
+        return web.HTTPFound(f"/auth/login")
+        
+    proj = await database.get_project_by_username_and_slug(username, slug)
+    if not proj:
+        return web.Response(text="Project not found", status=404)
+        
+    # Check if user is owner
+    if session_user["id"] != proj["user_id"] and session_user.get("username", "").lower() != username:
+        # Not owner, redirect to spectate
+        return web.HTTPFound(f"/spectate/{username}/{slug}")
+        
+    # Redirect to studio with active slug
+    return web.HTTPFound(f"/studio?slug={slug}")
+
+async def api_project_logs(request: web.Request) -> web.Response:
+    """Returns Antigravity CLI activity log entries from build.log (Section 4)"""
+    slug = request.match_info["slug"].lower()
+    token = request.query.get("token")
+    user = await get_session_user(request)
+    
+    proj = None
+    if user:
+        proj = await database.get_project(user["id"], slug)
+    if not proj and token:
+        proj = await database.get_project_by_spectator_token(token)
+    if not proj:
+        author = request.query.get("author")
+        if author:
+            proj = await database.get_project_by_username_and_slug(author, slug)
+        elif database.projects_col is not None:
+            proj = await database.projects_col.find_one({"slug": slug, "is_public": {"$ne": False}})
+            
+    if not proj:
+        return web.json_response({"success": False, "error": "Project not found."}, status=404)
+        
+    logs = projects_manager.read_build_log(proj["user_id"], slug, max_lines=50)
+    return web.json_response({"success": True, "slug": slug, "logs": logs})
 
 # --- WebSocket Hub: /ws/studio (Section 19, 20, 21, 22) ---
 
@@ -605,9 +760,11 @@ async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
                             profile = await database.get_user_profile(session_user["id"])
                             api_key = profile.get("studio_api_key") if profile else None
                             if api_key:
-                                await broadcast_project_log(slug, f"Processing request: '{prompt}'", "thinking")
+                                async def _ws_log_callback(step_type, message_text):
+                                    await broadcast_project_log(slug, message_text, step_type)
+                                    
                                 res = await ai_engine.process_code_request(
-                                    api_key, session_user["id"], session_user["username"], slug, prompt
+                                    api_key, session_user["id"], session_user["username"], slug, prompt, log_callback=_ws_log_callback
                                 )
                                 if res.get("success"):
                                     await broadcast_project_update(slug, {
@@ -616,9 +773,6 @@ async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
                                         "content": res["content"],
                                         "timestamp": int(time.time())
                                     })
-                                    await broadcast_project_log(slug, f"AI: {res['summary']}", "success")
-                                else:
-                                    await broadcast_project_log(slug, f"AI Error: {res.get('error')}", "error")
                                     
                     elif msg_type == "video_frame":
                         # Only creator can stream screen frames (Section 21, 81)
@@ -787,16 +941,23 @@ async def init_app():
     app.router.add_post("/api/delete-project", api_delete_project)
     app.router.add_post("/api/leave-vc", api_leave_vc)
     app.router.add_get("/api/project-files/{slug}", api_project_files)
+    app.router.add_get("/api/project-logs/{slug}", api_project_logs)
     app.router.add_get("/api/community-projects", api_community_projects)
     app.router.add_get("/api/download-zip/{username}/{slug}", api_download_zip)
     
     # WebSocket
     app.router.add_get("/ws/studio", handle_ws_studio)
     
+    # Creator Studio Project Route
+    app.router.add_get("/{username}/{slug}/studio", handle_user_slug_studio)
+
     # Dynamic Game Hosting (Sandboxed Game Iframes)
     app.router.add_get("/{username}/{slug}", handle_game_redirect)
     app.router.add_get("/{username}/{slug}/", handle_game_asset)
     app.router.add_get("/{username}/{slug}/{file:.*}", handle_game_asset)
+    
+    # User Profile / Portfolio Page
+    app.router.add_get("/{username}", handle_user_profile)
     
     return app
 
