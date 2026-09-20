@@ -80,16 +80,39 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
         
         def _call_gemini():
             client = genai.Client(api_key=cleaned_key)
-            response = client.models.generate_content(
-                model="gemini-3.6-flash",
-                contents=json.dumps(context_payload),
-                config=types.GenerateContentConfig(
-                    system_instruction=SYSTEM_PROMPT,
-                    response_mime_type="application/json",
-                    temperature=0.4
-                )
-            )
-            return response.text
+            last_err = None
+            # Multi-model waterfall to absorb free-tier 20 RPD caps:
+            # 1. gemini-3.6-flash (20 RPD) -> primary
+            # 2. gemini-3.8-flash (20 RPD) -> fallback 1
+            # 3. gemini-3.1-flash-lite (500 RPD) -> high-capacity fallback 2
+            for model_name in ["gemini-3.6-flash", "gemini-3.8-flash", "gemini-3.1-flash-lite"]:
+                try:
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=json.dumps(context_payload),
+                        config=types.GenerateContentConfig(
+                            system_instruction=SYSTEM_PROMPT,
+                            response_mime_type="application/json",
+                            temperature=0.4
+                        )
+                    )
+                    if response and response.text:
+                        return response.text
+                except APIError as ae:
+                    last_err = ae
+                    err_str = str(ae)
+                    # If 429 quota exhausted or 404 on this model, fall down to the next model in the waterfall
+                    if "RESOURCE_EXHAUSTED" in err_str or ae.code in (429, 404):
+                        continue
+                    # If invalid API key (400, 403), stop immediately
+                    if "API_KEY_INVALID" in err_str or ae.code in (400, 403):
+                        raise ae
+                except Exception as e:
+                    last_err = e
+                    continue
+            if last_err:
+                raise last_err
+            raise RuntimeError("All models in the generation waterfall failed.")
             
         try:
             # 50 second timeout on AI code generation (Section 85)
