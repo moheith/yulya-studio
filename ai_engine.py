@@ -97,28 +97,28 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
         except asyncio.TimeoutError:
             return {
                 "success": False,
-                "error": "Yulya couldn't finish the request. The Gemini request timed out. Please try again."
+                "error": "Yulya couldn't finish the request. The Google AI Studio request timed out. Please try again."
             }
         except APIError as ae:
             err_msg = str(ae)
             if "RESOURCE_EXHAUSTED" in err_msg or ae.code == 429:
                 return {
                     "success": False,
-                    "error": "Gemini quota reached. Your API key has reached its current usage limit. Check your Google AI Studio quota or try again later."
+                    "error": "Google AI Studio quota reached. Your API key has reached its current usage limit. Check your Google AI Studio quota or try again later."
                 }
             elif "API_KEY_INVALID" in err_msg or ae.code in [400, 403]:
                 return {
                     "success": False,
-                    "error": "Your Gemini API key could not be verified by Google AI. Please update your key in setup."
+                    "error": "Your Google AI Studio API key could not be verified by Google AI. Please update your key in setup."
                 }
             return {
                 "success": False,
-                "error": f"Gemini API returned an error: {err_msg[:120]}"
+                "error": f"Google AI Studio returned an error: {err_msg[:120]}"
             }
         except Exception as e:
             return {
                 "success": False,
-                "error": f"Failed to connect to Gemini: {str(e)[:120]}"
+                "error": f"Failed to connect to Google AI Studio: {str(e)[:120]}"
             }
             
         try:

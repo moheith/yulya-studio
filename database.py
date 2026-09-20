@@ -53,14 +53,14 @@ async def init_db():
         print(f"[DATABASE] Connection error: {e}")
         return False
 
-async def verify_gemini_api_key(api_key: str) -> tuple[bool, str]:
+async def verify_google_ai_studio_key(api_key: str) -> tuple[bool, str]:
     """
-    Verifies that the provided Gemini API key is valid by sending a minimal ping request.
+    Verifies that the provided Google AI Studio API key is valid by sending a minimal ping request.
     Uses gemma-4-31b-it as primary check with gemini-2.5-flash fallback.
     Returns (is_valid, message).
     """
     if not api_key or not isinstance(api_key, str) or len(api_key.strip()) < 15:
-        return False, "API key is too short or invalid format."
+        return False, "Google AI Studio API key is too short or invalid format."
     
     cleaned_key = api_key.strip()
     
@@ -73,11 +73,11 @@ async def verify_gemini_api_key(api_key: str) -> tuple[bool, str]:
                     contents="ping"
                 )
                 if resp and hasattr(resp, 'text'):
-                    return True, "API key verified successfully."
+                    return True, "Google AI Studio API key verified successfully."
             except APIError as ae:
                 msg = str(ae)
                 if "API_KEY_INVALID" in msg or "not valid" in msg.lower() or ae.code in [400, 403]:
-                    return False, "This Gemini API key could not be verified by Google AI Studio. Please check the key and try again."
+                    return False, "This Google AI Studio API key could not be verified by Google AI Studio. Please check the key and try again."
                 elif "RESOURCE_EXHAUSTED" in msg or ae.code == 429:
                     return True, "Key is valid, though current quota limit is reached."
                 # On 5xx server errors or unsupported model, try fallback
@@ -85,7 +85,7 @@ async def verify_gemini_api_key(api_key: str) -> tuple[bool, str]:
             except Exception as e:
                 err_str = str(e)
                 if "API_KEY_INVALID" in err_str or "not valid" in err_str.lower():
-                    return False, "This Gemini API key could not be verified. Check the key and try again."
+                    return False, "This Google AI Studio API key could not be verified. Check the key and try again."
                 continue
         return False, "Unable to verify API key with Google AI Studio. Please verify the key and try again."
 
@@ -95,6 +95,9 @@ async def verify_gemini_api_key(api_key: str) -> tuple[bool, str]:
     except Exception as e:
         return False, f"Verification failed: {str(e)[:100]}"
 
+# Backward-compatibility alias
+verify_gemini_api_key = verify_google_ai_studio_key
+
 async def get_user_profile(user_id: int):
     """Retrieves a user profile by Discord User ID."""
     if users_col is None:
@@ -103,7 +106,7 @@ async def get_user_profile(user_id: int):
 
 async def save_user_api_key(user_id: int, api_key: str, username: str = None) -> dict:
     """
-    Validates, duplicate-checks, and saves a user's personal Gemini API key.
+    Validates, duplicate-checks, and saves a user's personal Google AI Studio API key.
     Sensitive data: NEVER exposed in frontend responses.
     """
     if users_col is None:
@@ -120,15 +123,15 @@ async def save_user_api_key(user_id: int, api_key: str, username: str = None) ->
     if existing:
         return {
             "success": False, 
-            "error": "This Gemini API key is already registered to another user account. Please use your own unique key from Google AI Studio."
+            "error": "This Google AI Studio API key is already registered to another user account. Please use your own unique key from Google AI Studio."
         }
     
     # 2. Live verification check with Google AI Studio
-    is_valid, verify_msg = await verify_gemini_api_key(cleaned_key)
+    is_valid, verify_msg = await verify_google_ai_studio_key(cleaned_key)
     if not is_valid:
         return {
-            "success": False,
-            "error": verify_msg or "Invalid API key. Google AI Studio rejected the key."
+            "success": False, 
+            "error": verify_msg or "Invalid Google AI Studio API key. Google AI Studio rejected the key."
         }
         
     # 3. Save key and accepted terms in user profile

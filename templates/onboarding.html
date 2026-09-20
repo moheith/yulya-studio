@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Connect Gemini — Yulya Studio</title>
+  <title>Connect Google AI Studio — Yulya Studio</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -341,8 +341,8 @@
   <div class="onboarding-card">
     <div class="brand-header">
       <div class="brand-mark">Yulya Studio</div>
-      <h1 class="onboarding-title">Connect Gemini</h1>
-      <p class="onboarding-sub">Use your personal Gemini API key to power game generation.</p>
+      <h1 class="onboarding-title">Connect Google AI Studio</h1>
+      <p class="onboarding-sub">Use your personal Google AI Studio API key to power game generation.</p>
     </div>
 
     <div id="alertBox" class="alert-banner"></div>
@@ -358,7 +358,7 @@
         </a>
       </div>
     {% else %}
-      <!-- State 2: Save Gemini Key -->
+      <!-- State 2: Save Google AI Studio Key -->
       <div id="formView">
         <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-4); padding: var(--space-2) var(--space-3); background-color: var(--bg-deepest); border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);">
           <span class="text-xs text-muted">Discord Account</span>
@@ -368,7 +368,7 @@
         <div class="steps-list">
           <div class="step-item">
             <span class="step-num">1</span>
-            <div>Open <a href="https://aistudio.google.com/apikey" target="_blank" class="step-link">Google AI Studio</a> in a new tab</div>
+            <div>Open <a href="https://aistudio.google.com/apikey" target="_blank" class="step-link">Google AI Studio (aistudio.google.com)</a> in a new tab</div>
           </div>
           <div class="step-item">
             <span class="step-num">2</span>
@@ -376,14 +376,14 @@
           </div>
           <div class="step-item">
             <span class="step-num">3</span>
-            <div>Paste the key below for instant verification</div>
+            <div>Paste your Google AI Studio key below for instant verification</div>
           </div>
         </div>
 
         <div class="field-group">
-          <label class="field-label" for="apiKeyInput">Gemini API Key</label>
+          <label class="field-label" for="apiKeyInput">Google AI Studio API Key</label>
           <div class="input-wrapper">
-            <input type="password" id="apiKeyInput" class="input" placeholder="AIzaSy..." autocomplete="off">
+            <input type="password" id="apiKeyInput" class="input" placeholder="AIzaSy... (Google AI Studio Key)" autocomplete="off">
             <button type="button" class="input-action-btn" id="toggleVisibilityBtn" title="Show/Hide Key">
               <span id="eyeIcon"></span>
             </button>
@@ -393,7 +393,7 @@
         <label class="terms-box">
           <input type="checkbox" id="termsCheck">
           <span class="terms-text">
-            I accept the terms. I understand I am using my own Gemini API quota and will not generate malicious code or crypto miners.
+            I accept the terms. I understand I am using my own Google AI Studio API quota and will not generate malicious code or crypto miners.
           </span>
         </label>
 
@@ -403,7 +403,7 @@
 
         <div class="security-notice">
           <span id="shieldIcon"></span>
-          Your key is stored securely and never shown in the UI.
+          Your Google AI Studio key is stored securely and never shown in the UI.
         </div>
       </div>
 
@@ -412,7 +412,7 @@
         <div class="success-icon-wrap" id="checkIcon"></div>
         <h2 style="font-size: 20px; font-weight: 700; margin-bottom: var(--space-2); color: var(--text-primary);">Setup Complete</h2>
         <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: var(--space-6); line-height: 1.5;">
-          Your Gemini key has been verified and connected to your Discord profile.
+          Your Google AI Studio API key has been verified and connected to your Discord profile.
         </p>
         <div style="background-color: var(--bg-deepest); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-4); margin-bottom: var(--space-6); text-align: left;">
           <div class="text-xs text-muted" style="margin-bottom: 4px; font-weight: 600; text-transform: uppercase;">Next Step</div>
@@ -477,7 +477,7 @@
 
       const key = input.value.trim();
       if (!key || key.length < 15) {
-        showAlert('Please enter a valid Gemini API key.', 'error');
+        showAlert('Please enter a valid Google AI Studio API key.', 'error');
         input.focus();
         return;
       }
@@ -503,7 +503,7 @@
           document.getElementById('formView').style.display = 'none';
           document.getElementById('successView').style.display = 'block';
         } else {
-          showAlert(data.error || 'This Gemini API key could not be verified.', 'error');
+          showAlert(data.error || 'This Google AI Studio API key could not be verified.', 'error');
           btn.disabled = false;
           input.disabled = false;
           btn.textContent = 'Save & Continue';

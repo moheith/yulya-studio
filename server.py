@@ -352,10 +352,10 @@ async def api_modify_project(request: web.Request) -> web.Response:
         profile = await database.get_user_profile(user["id"])
         api_key = profile.get("studio_api_key") if profile else None
         if not api_key:
-            return web.json_response({"success": False, "error": "No Gemini API key saved. Please set up your key first."}, status=400)
+            return web.json_response({"success": False, "error": "No Google AI Studio API key saved. Please set up your key first."}, status=400)
             
         # Broadcast "thinking" log to connected WebSockets
-        await broadcast_project_log(slug, "Thinking... Gemini is analyzing your project.", "thinking")
+        await broadcast_project_log(slug, "Thinking... Google AI Studio is analyzing your project.", "thinking")
         
         result = await ai_engine.process_code_request(api_key, user["id"], user["username"], slug, prompt)
         
