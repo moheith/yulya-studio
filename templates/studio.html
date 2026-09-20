@@ -527,6 +527,53 @@
         font-size: 12px;
       }
     }
+
+    /* Terminal Active Typing & Progress Indicator */
+    .terminal-loader {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      margin: 6px 0;
+      background: rgba(139, 92, 246, 0.08);
+      border: 1px dashed rgba(139, 92, 246, 0.35);
+      border-radius: var(--radius-sm);
+      color: #c4b5fd;
+      font-size: 12px;
+      font-family: var(--font-code);
+      animation: pulseGlow 1.8s infinite;
+    }
+
+    @keyframes pulseGlow {
+      0%, 100% { border-color: rgba(139, 92, 246, 0.3); }
+      50% { border-color: rgba(139, 92, 246, 0.8); background: rgba(139, 92, 246, 0.14); }
+    }
+
+    .terminal-spinner {
+      width: 12px;
+      height: 12px;
+      border: 2px solid rgba(139, 92, 246, 0.3);
+      border-top-color: #a78bfa;
+      border-radius: 50%;
+      animation: spinLoader 0.8s linear infinite;
+      flex-shrink: 0;
+    }
+
+    @keyframes spinLoader {
+      to { transform: rotate(360deg); }
+    }
+
+    .typing-dots::after {
+      content: '...';
+      animation: dotPulse 1.5s steps(4, end) infinite;
+    }
+
+    @keyframes dotPulse {
+      0%, 20% { content: ''; }
+      40% { content: '.'; }
+      60% { content: '..'; }
+      80%, 100% { content: '...'; }
+    }
   </style>
 </head>
 <body>
@@ -561,9 +608,9 @@
       </div>
 
       <!-- Antigravity Coding Waterfall Pill -->
-      <div class="status-pill waterfall-pill" title="Antigravity Coding Waterfall: Gemini 3.8 Flash with Google Search Grounding">
+      <div class="status-pill waterfall-pill" title="Antigravity Coding Waterfall: Gemini 3.8 Flash multi-model waterfall">
         <span class="status-dot online"></span>
-        <span>Waterfall: 3.8 Flash + Search</span>
+        <span>Waterfall: 3.8 Flash</span>
       </div>
 
       <!-- Live AI Connect Toggle Button -->
@@ -633,7 +680,7 @@
           <div class="log-line">
             <span class="log-time">00:00:00</span>
             <span class="log-badge thinking">AI</span>
-            <span class="log-msg">Antigravity Coding Engine ready with Google Search Grounding & multi-model waterfall.</span>
+            <span class="log-msg">Antigravity Coding Engine ready with multi-model waterfall.</span>
           </div>
         </div>
       </div>
@@ -880,16 +927,21 @@
     class LiveAudioPlayer {
       constructor() {
         this.audioCtx = null;
+        this.gainNode = null;
         this.nextStartTime = 0;
+        this._speakingTimeout = null;
       }
 
       init() {
         if (!this.audioCtx) {
           const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-          this.audioCtx = new AudioContextClass({ sampleRate: 24000 });
+          this.audioCtx = new AudioContextClass();
+          this.gainNode = this.audioCtx.createGain();
+          this.gainNode.gain.value = 1.2;
+          this.gainNode.connect(this.audioCtx.destination);
         }
         if (this.audioCtx.state === 'suspended') {
-          this.audioCtx.resume();
+          this.audioCtx.resume().catch(() => {});
         }
       }
 
@@ -915,11 +967,11 @@
 
           const source = this.audioCtx.createBufferSource();
           source.buffer = audioBuffer;
-          source.connect(this.audioCtx.destination);
+          source.connect(this.gainNode || this.audioCtx.destination);
 
           const curTime = this.audioCtx.currentTime;
           if (this.nextStartTime < curTime) {
-            this.nextStartTime = curTime;
+            this.nextStartTime = curTime + 0.03;
           }
           source.start(this.nextStartTime);
           this.nextStartTime += audioBuffer.duration;
@@ -942,6 +994,7 @@
         if (this.audioCtx) {
           try { this.audioCtx.close(); } catch (e) {}
           this.audioCtx = null;
+          this.gainNode = null;
           this.nextStartTime = 0;
         }
         stopWaveform();
@@ -965,9 +1018,49 @@
       });
     }
 
+    // Terminal Loader Helpers
+    function showTerminalLoader(text = 'Antigravity is coding your game...') {
+      const feed = document.getElementById('terminalFeed');
+      if (!feed) return;
+      let loader = document.getElementById('terminalLoader');
+      if (!loader) {
+        loader = document.createElement('div');
+        loader.id = 'terminalLoader';
+        loader.className = 'terminal-loader';
+        loader.innerHTML = `<div class="terminal-spinner"></div><span class="terminal-loader-text typing-dots">${text}</span>`;
+        feed.appendChild(loader);
+      } else {
+        const textSpan = loader.querySelector('.terminal-loader-text');
+        if (textSpan) textSpan.textContent = text;
+        loader.style.display = 'flex';
+        feed.appendChild(loader);
+      }
+      feed.scrollTop = feed.scrollHeight;
+    }
+
+    function updateTerminalLoader(text) {
+      const loader = document.getElementById('terminalLoader');
+      if (loader) {
+        const textSpan = loader.querySelector('.terminal-loader-text');
+        if (textSpan) textSpan.textContent = text;
+        const feed = document.getElementById('terminalFeed');
+        if (feed) feed.scrollTop = feed.scrollHeight;
+      } else {
+        showTerminalLoader(text);
+      }
+    }
+
+    function hideTerminalLoader() {
+      const loader = document.getElementById('terminalLoader');
+      if (loader) {
+        loader.remove();
+      }
+    }
+
     // Terminal Logging
     function logTerminal(message, level = 'info', customTime = null) {
       const feed = document.getElementById('terminalFeed');
+      if (!feed) return;
       const now = new Date();
       const timeStr = customTime || now.toTimeString().split(' ')[0];
 
@@ -1002,7 +1095,12 @@
       line.appendChild(badgeSpan);
       line.appendChild(msgSpan);
 
-      feed.appendChild(line);
+      const loader = document.getElementById('terminalLoader');
+      if (loader) {
+        feed.insertBefore(line, loader);
+      } else {
+        feed.appendChild(line);
+      }
       feed.scrollTop = feed.scrollHeight;
     }
 
@@ -1060,6 +1158,7 @@
           data.logs.forEach(item => {
             logTerminal(item.message, item.step || 'info', item.time);
           });
+          logTerminal(`[RESUME] Workspace restored for @${USERNAME}/${ACTIVE_SLUG}. Session active.`, 'pass');
         }
       } catch (e) {}
     }
@@ -1114,6 +1213,20 @@
             
             if (data.type === 'log') {
               logTerminal(data.message, data.level || 'info');
+              const lvl = (data.level || '').toLowerCase();
+              if (lvl === 'thinking') {
+                updateTerminalLoader('Antigravity is planning code architecture...');
+              } else if (lvl === 'diff') {
+                updateTerminalLoader('Writing code changes...');
+              } else if (lvl === 'replace_content') {
+                updateTerminalLoader('Applying updates to files...');
+              } else if (lvl === 'verify') {
+                updateTerminalLoader('Verifying syntax and game loop...');
+              } else if (lvl === 'pass') {
+                hideTerminalLoader();
+              } else if (lvl === 'error' || lvl === 'fail') {
+                hideTerminalLoader();
+              }
             } else if (data.type === 'ai_audio') {
               // Play Gemini Live streaming voice through browser speakers
               if (data.pcm) {
@@ -1145,6 +1258,7 @@
               setLiveStatus('Live AI Error', 'offline');
               updateLiveButton(false);
             } else if (data.type === 'code_update') {
+              hideTerminalLoader();
               logTerminal(`[PASS] ${data.summary}`, 'pass');
               if (data.content) {
                 fileContents = data.content;
@@ -1426,7 +1540,8 @@
 
     async function executeCommand(prompt) {
       logTerminal(`YOU: ${prompt}`, 'user');
-      logTerminal('Antigravity Coding Engine analyzing request with Search Grounding...', 'thinking');
+      logTerminal('Antigravity Coding Engine analyzing request...', 'thinking');
+      showTerminalLoader('Antigravity is analyzing your request...');
 
       const sendBtn = document.getElementById('sendBtn');
       sendBtn.disabled = true;
@@ -1439,10 +1554,12 @@
         });
         const data = await res.json();
         if (!data.success) {
+          hideTerminalLoader();
           logTerminal(`Error: ${data.error}`, 'error');
           ToastManager.show(data.error || 'Failed to modify game', 'error');
         }
       } catch (err) {
+        hideTerminalLoader();
         logTerminal('Network error submitting command.', 'error');
         ToastManager.show('Request failed', 'error');
       } finally {
@@ -1689,6 +1806,15 @@
 
     // --- Clean Auto-Disconnect on Unload / Tab Close ---
     function cleanDisconnectAll() {
+      try {
+        const exitData = JSON.stringify({ step: 'EXIT', message: 'Studio session closed. All repository files preserved.' });
+        if (navigator.sendBeacon) {
+          navigator.sendBeacon(`/api/project-logs/${ACTIVE_SLUG}`, new Blob([exitData], { type: 'application/json' }));
+        } else {
+          fetch(`/api/project-logs/${ACTIVE_SLUG}`, { method: 'POST', body: exitData, headers: { 'Content-Type': 'application/json' }, keepalive: true }).catch(() => {});
+        }
+      } catch (e) {}
+
       if (ws && ws.readyState === WebSocket.OPEN) {
         try {
           ws.send(JSON.stringify({ type: 'disconnect_live' }));

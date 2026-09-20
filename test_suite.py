@@ -274,6 +274,28 @@ async def run_tests():
         except server.web.HTTPFound:
             assert_true(True, "Studio direct route redirects unauthenticated user safely")
 
+        # Test handle_game_asset returns 200 OK with valid content_type and charset (No 500 error)
+        from unittest.mock import patch
+        projects_manager.create_starter_game(888123456, "mockauthor", "test-game", "Test Game")
+        with patch("database.get_project_by_username_and_slug", AsyncMock(return_value={"user_id": 888123456, "slug": "test-game", "title": "Test Game"})):
+            req_asset = make_mocked_request("GET", "/mockauthor/test-game/", match_info={"username": "mockauthor", "slug": "test-game", "file": "index.html"}, app=app)
+            asset_res = await server.handle_game_asset(req_asset)
+            assert_true(asset_res.status == 200, "handle_game_asset returns 200 OK without 500 error")
+            assert_true(asset_res.content_type == "text/html", "handle_game_asset has clean content_type 'text/html'")
+            assert_true(asset_res.charset == "utf-8", "handle_game_asset specifies charset='utf-8' correctly")
+
+        # Test api_save_project_log and log retrieval up to 200 lines
+        with patch("server.get_session_user", AsyncMock(return_value={"id": 888123456, "username": "mockauthor"})), \
+             patch("database.get_project", AsyncMock(return_value={"user_id": 888123456, "slug": "test-game"})):
+            req_log = make_mocked_request("POST", "/api/project-logs/test-game", match_info={"slug": "test-game"}, app=app)
+            req_log.json = AsyncMock(return_value={"step": "EXIT", "message": "Session closed"})
+            log_res = await server.api_save_project_log(req_log)
+            assert_true(log_res.status == 200, "api_save_project_log succeeds with 200 OK")
+            
+            # Verify log entry in build.log
+            logs = projects_manager.read_build_log(888123456, "test-game", max_lines=200)
+            assert_true(any(l.get("step") == "exit" for l in logs), "EXIT step written to build.log")
+
     except Exception as e:
         assert_true(False, f"Routing & WebSocket error: {e}")
 

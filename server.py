@@ -537,13 +537,14 @@ async def handle_game_asset(request: web.Request) -> web.Response:
     if not target.exists() or not target.is_file():
         return web.Response(text="File not found", status=404)
         
-    content_type = "text/html; charset=utf-8"
-    if safe_name.endswith(".css"): content_type = "text/css; charset=utf-8"
-    elif safe_name.endswith(".js"): content_type = "application/javascript; charset=utf-8"
-    elif safe_name.endswith(".json"): content_type = "application/json; charset=utf-8"
-    elif safe_name.endswith(".png"): content_type = "image/png"
-    elif safe_name.endswith((".jpg", ".jpeg")): content_type = "image/jpeg"
-    elif safe_name.endswith(".svg"): content_type = "image/svg+xml"
+    content_type = "text/html"
+    charset = "utf-8"
+    if safe_name.endswith(".css"): content_type = "text/css"
+    elif safe_name.endswith(".js"): content_type = "application/javascript"
+    elif safe_name.endswith(".json"): content_type = "application/json"
+    elif safe_name.endswith(".png"): content_type = "image/png"; charset = None
+    elif safe_name.endswith((".jpg", ".jpeg")): content_type = "image/jpeg"; charset = None
+    elif safe_name.endswith(".svg"): content_type = "image/svg+xml"; charset = "utf-8"
     
     body_bytes = target.read_bytes()
     is_iframe = (request.headers.get("Sec-Fetch-Dest") == "iframe") or (request.query.get("embed") == "1") or (request.query.get("raw") == "1")
@@ -568,6 +569,7 @@ async def handle_game_asset(request: web.Request) -> web.Response:
     return web.Response(
         body=body_bytes,
         content_type=content_type,
+        charset=charset,
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate",
             "X-Content-Type-Options": "nosniff"
@@ -669,8 +671,28 @@ async def api_project_logs(request: web.Request) -> web.Response:
     if not proj:
         return web.json_response({"success": False, "error": "Project not found."}, status=404)
         
-    logs = projects_manager.read_build_log(proj["user_id"], slug, max_lines=50)
+    logs = projects_manager.read_build_log(proj["user_id"], slug, max_lines=200)
     return web.json_response({"success": True, "slug": slug, "logs": logs})
+
+async def api_save_project_log(request: web.Request) -> web.Response:
+    """Appends an activity or session log entry to build.log (e.g. exit/close events)"""
+    slug = request.match_info["slug"].lower()
+    user = await get_session_user(request)
+    if not user:
+        return web.json_response({"success": False, "error": "Unauthorized."}, status=401)
+        
+    proj = await database.get_project(user["id"], slug)
+    if not proj:
+        return web.json_response({"success": False, "error": "Project not found."}, status=404)
+        
+    try:
+        data = await request.json()
+        step = str(data.get("step", "INFO")).upper()[:20]
+        msg = str(data.get("message", "Session event"))[:200]
+        projects_manager.write_build_log(user["id"], slug, step, msg)
+        return web.json_response({"success": True})
+    except Exception as e:
+        return web.json_response({"success": False, "error": str(e)}, status=400)
 
 # --- Gemini 3.8 Live Multimodal Session Bridge ---
 
@@ -806,8 +828,18 @@ async def _live_receive_loop(ws: web.WebSocketResponse, slug: str, session, api_
                     for part in model_turn.parts:
                         # PCM Audio response (24kHz little-endian)
                         if part.inline_data and part.inline_data.data:
-                            audio_b64 = base64.b64encode(part.inline_data.data).decode("ascii")
-                            if not ws.closed:
+                            raw_data = part.inline_data.data
+                            if isinstance(raw_data, bytes):
+                                audio_b64 = base64.b64encode(raw_data).decode("ascii")
+                            elif isinstance(raw_data, str):
+                                try:
+                                    base64.b64decode(raw_data)
+                                    audio_b64 = raw_data
+                                except Exception:
+                                    audio_b64 = base64.b64encode(raw_data.encode("utf-8")).decode("ascii")
+                            else:
+                                audio_b64 = ""
+                            if audio_b64 and not ws.closed:
                                 await ws.send_json({
                                     "type": "ai_audio",
                                     "pcm": audio_b64,
@@ -1217,6 +1249,7 @@ async def init_app():
     app.router.add_post("/api/leave-vc", api_leave_vc)
     app.router.add_get("/api/project-files/{slug}", api_project_files)
     app.router.add_get("/api/project-logs/{slug}", api_project_logs)
+    app.router.add_post("/api/project-logs/{slug}", api_save_project_log)
     app.router.add_get("/api/community-projects", api_community_projects)
     app.router.add_get("/api/download-zip/{username}/{slug}", api_download_zip)
     

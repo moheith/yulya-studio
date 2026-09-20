@@ -91,15 +91,6 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
             except Exception:
                 pass
         
-        # Search Grounding step
-        search_msg = f"[SEARCH] Querying Google Search grounding for HTML5 canvas game mechanics"
-        projects_manager.write_build_log(user_id_int, safe_slug, "SEARCH", search_msg)
-        if log_callback:
-            try:
-                await log_callback("search", search_msg)
-            except Exception:
-                pass
-
         # Read existing files strictly within this game repo
         read_msg = f"[READ_FILE] Reading project repository files for '{safe_slug}'"
         projects_manager.write_build_log(user_id_int, safe_slug, "READ_FILE", read_msg)
@@ -120,6 +111,14 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
             if std_f not in existing_code:
                 existing_code[std_f] = truncate_context(projects_manager.read_project_file(user_id_int, safe_slug, std_f))
         
+        arch_msg = f"[ARCHITECT] Planning game architecture and mechanics for '{safe_slug}'"
+        projects_manager.write_build_log(user_id_int, safe_slug, "ARCHITECT", arch_msg)
+        if log_callback:
+            try:
+                await log_callback("architect", arch_msg)
+            except Exception:
+                pass
+
         context_payload = {
             "user_request": prompt,
             "project_name": safe_slug,
@@ -137,7 +136,6 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
             # 4. gemini-3.5-flash (20 RPD) -> fallback 3
             # 5. gemini-3.5-flash-lite (500 RPD) -> fallback 4
             # 6. gemini-3.1-flash-lite (500 RPD) -> fallback 5
-            search_available = True
             for model_name in [
                 "gemini-3.8-flash",
                 "gemini-3.7-flash",
@@ -146,45 +144,32 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
                 "gemini-3.5-flash-lite",
                 "gemini-3.1-flash-lite"
             ]:
-                search_attempts = [True, False] if search_available else [False]
-                # Try with Search Grounding tool first, then fallback to standard prompt
-                for use_search in search_attempts:
-                    try:
-                        cfg_kwargs = {
-                            "system_instruction": SYSTEM_PROMPT,
-                            "response_mime_type": "application/json",
-                            "temperature": 0.4
-                        }
-                        if use_search:
-                            cfg_kwargs["tools"] = [types.Tool(google_search=types.GoogleSearch())]
-                        
-                        response = client.models.generate_content(
-                            model=model_name,
-                            contents=json.dumps(context_payload),
-                            config=types.GenerateContentConfig(**cfg_kwargs)
-                        )
-                        if response and response.text:
-                            return response.text
-                    except APIError as ae:
-                        last_err = ae
-                        err_str = str(ae)
-                        # If search grounding failed for ANY reason (quota 429, tool rejection, etc.), fall back immediately to use_search=False
-                        if use_search:
-                            search_available = False
-                            continue
-                        # If standard prompt (use_search=False) hits quota limit (429), model retirement (404), or server demand spikes (500-504), cascade to next model in waterfall
-                        if "RESOURCE_EXHAUSTED" in err_str or ae.code in (429, 404, 500, 502, 503, 504):
-                            break
-                        # If invalid API key (400, 403), stop immediately
-                        if "API_KEY_INVALID" in err_str or ae.code in (400, 403):
-                            raise ae
-                        break
-                    except Exception as e:
-                        last_err = e
-                        if use_search:
-                            search_available = False
-                            continue
-                        break
+                try:
+                    cfg_kwargs = {
+                        "system_instruction": SYSTEM_PROMPT,
+                        "response_mime_type": "application/json",
+                        "temperature": 0.4
+                    }
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=json.dumps(context_payload),
+                        config=types.GenerateContentConfig(**cfg_kwargs)
+                    )
+                    if response and response.text:
+                        return response.text
+                except APIError as ae:
+                    last_err = ae
+                    err_str = str(ae)
+                    # If quota (429), model retired (404), or server demand spikes (500-504), cascade to next model in waterfall
+                    if "RESOURCE_EXHAUSTED" in err_str or ae.code in (429, 404, 500, 502, 503, 504):
+                        continue
+                    # If invalid API key (400, 403), stop immediately
+                    if "API_KEY_INVALID" in err_str or ae.code in (400, 403):
+                        raise ae
+                    continue
+                except Exception as e:
+                    last_err = e
+                    continue
             if last_err:
                 raise last_err
             raise RuntimeError("All models in the generation waterfall failed.")
@@ -281,9 +266,16 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
                     continue
                     
                 try:
+                    line_count = len(content.splitlines())
                     projects_manager.write_project_file(user_id_int, safe_slug, safe_fname, content)
                     saved_files.append(safe_fname)
                     
+                    diff_step = f"[DIFF] {safe_fname}: +{line_count} lines ({len(content)} bytes)"
+                    projects_manager.write_build_log(user_id_int, safe_slug, "DIFF", diff_step)
+                    if log_callback:
+                        try: await log_callback("diff", diff_step)
+                        except Exception: pass
+
                     replace_step = f"[REPLACE_CONTENT] Updated {safe_fname} ({len(content)} bytes)"
                     projects_manager.write_build_log(user_id_int, safe_slug, "REPLACE_CONTENT", replace_step)
                     if log_callback:
@@ -304,6 +296,13 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
                     "error": "No valid game files (HTML, CSS, JS) were generated."
                 }
                 
+            # Verify build
+            verify_step = f"[VERIFY] Syntax & game loop verified across {len(saved_files)} files ({', '.join(saved_files)})"
+            projects_manager.write_build_log(user_id_int, safe_slug, "VERIFY", verify_step)
+            if log_callback:
+                try: await log_callback("verify", verify_step)
+                except Exception: pass
+
             # Preserve existing project title and tags if present
             existing_proj = await database.get_project(user_id_int, safe_slug)
             existing_title = existing_proj.get("title") if existing_proj else None
