@@ -7,8 +7,43 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/studio.css">
+  <link rel="stylesheet" href="/static/css/studio.css?v=20260920">
   <style>
+    :root {
+      --bg-deepest: #050110;
+      --bg-base: #0a0518;
+      --bg-elevated: #0f0724;
+      --border-subtle: rgba(120, 80, 160, 0.15);
+      --border-active: rgba(120, 80, 160, 0.35);
+      --accent-primary: #8b5cf6;
+      --accent-primary-hover: #9d74f7;
+      --accent-blue: #38bdf8;
+      --accent-green: #34d399;
+      --accent-rose: #f43f5e;
+      --text-primary: #f0eef6;
+      --text-secondary: #9590a8;
+      --text-tertiary: #6b6580;
+      --radius-sm: 6px;
+      --radius-md: 8px;
+      --radius-lg: 12px;
+      --space-1: 4px;
+      --space-2: 8px;
+      --space-3: 12px;
+      --space-4: 16px;
+      --space-5: 20px;
+      --space-6: 24px;
+      --space-8: 32px;
+      --font-ui: 'Space Grotesk', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-code: 'JetBrains Mono', ui-monospace, monospace;
+      --transition-fast: all 0.15s ease;
+    }
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
     body {
       min-height: 100vh;
       display: flex;
@@ -17,7 +52,84 @@
       justify-content: center;
       padding: var(--space-4);
       background-color: var(--bg-deepest);
+      color: var(--text-primary);
+      font-family: var(--font-ui);
+      -webkit-font-smoothing: antialiased;
     }
+
+    /* Core Components */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--space-2);
+      font-family: var(--font-ui);
+      font-size: 13px;
+      font-weight: 600;
+      border-radius: var(--radius-sm);
+      border: 1px solid transparent;
+      cursor: pointer;
+      text-decoration: none;
+      transition: var(--transition-fast);
+      user-select: none;
+    }
+    .btn-primary {
+      background-color: var(--accent-primary);
+      color: #ffffff;
+      border-color: var(--accent-primary);
+    }
+    .btn-primary:hover {
+      background-color: var(--accent-primary-hover);
+      border-color: var(--accent-primary-hover);
+    }
+    .btn-secondary {
+      background-color: var(--bg-elevated);
+      color: var(--text-primary);
+      border-color: var(--border-subtle);
+    }
+    .btn-secondary:hover {
+      border-color: var(--border-active);
+      background-color: var(--bg-base);
+    }
+    .btn-lg {
+      height: 42px;
+      padding: 0 var(--space-5);
+      font-size: 14px;
+    }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .input {
+      width: 100%;
+      height: 38px;
+      background-color: var(--bg-deepest);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      padding: 0 var(--space-3);
+      color: var(--text-primary);
+      font-family: var(--font-ui);
+      font-size: 13px;
+      outline: none;
+      transition: var(--transition-fast);
+    }
+    .input:focus {
+      border-color: var(--accent-primary);
+      box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2);
+    }
+    .input:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .text-xs { font-size: 12px; }
+    .text-muted { color: var(--text-secondary); }
+    .font-mono { font-family: var(--font-code); }
+
+    .icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .icon-sm { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .icon-lg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
     .onboarding-card {
       background-color: var(--bg-elevated);
@@ -315,8 +427,17 @@
     {% endif %}
   </div>
 
-  <script src="/static/js/studio.js"></script>
+  <script src="/static/js/studio.js?v=20260920"></script>
   <script>
+    // Resilient Icons fallback in case static assets are slow to load
+    window.Icons = window.Icons || {
+      discord: (cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994.021-.041.001-.09-.041-.106a13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.929 1.793 8.18 1.793 12.061 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.894.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.028zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>`,
+      eye: (cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`,
+      eyeOff: (cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`,
+      shield: (cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`,
+      check: (cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>`
+    };
+
     const discordIconEl = document.getElementById('discordIcon');
     if (discordIconEl) discordIconEl.innerHTML = Icons.discord('icon');
 
@@ -324,10 +445,10 @@
     if (eyeIconEl) eyeIconEl.innerHTML = Icons.eye('icon-sm');
 
     const shieldIconEl = document.getElementById('shieldIcon');
-    if (shieldIconEl) shieldIconEl.innerHTML = Icons.shield('icon-sm');
+    if (shieldIconEl && Icons.shield) shieldIconEl.innerHTML = Icons.shield('icon-sm');
 
     const checkIconEl = document.getElementById('checkIcon');
-    if (checkIconEl) checkIconEl.innerHTML = Icons.check('icon-lg');
+    if (checkIconEl && Icons.check) checkIconEl.innerHTML = Icons.check('icon-lg');
 
     // Toggle password visibility
     const toggleBtn = document.getElementById('toggleVisibilityBtn');

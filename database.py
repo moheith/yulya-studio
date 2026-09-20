@@ -56,39 +56,44 @@ async def init_db():
 async def verify_gemini_api_key(api_key: str) -> tuple[bool, str]:
     """
     Verifies that the provided Gemini API key is valid by sending a minimal ping request.
+    Uses gemma-4-31b-it as primary check with gemini-2.5-flash fallback.
     Returns (is_valid, message).
     """
     if not api_key or not isinstance(api_key, str) or len(api_key.strip()) < 15:
         return False, "API key is too short or invalid format."
     
     cleaned_key = api_key.strip()
+    
+    def _test_call():
+        client = genai.Client(api_key=cleaned_key)
+        for model_name in ["gemma-4-31b-it", "gemini-2.5-flash"]:
+            try:
+                resp = client.models.generate_content(
+                    model=model_name,
+                    contents="ping"
+                )
+                if resp and hasattr(resp, 'text'):
+                    return True, "API key verified successfully."
+            except APIError as ae:
+                msg = str(ae)
+                if "API_KEY_INVALID" in msg or "not valid" in msg.lower() or ae.code in [400, 403]:
+                    return False, "This Gemini API key could not be verified by Google AI Studio. Please check the key and try again."
+                elif "RESOURCE_EXHAUSTED" in msg or ae.code == 429:
+                    return True, "Key is valid, though current quota limit is reached."
+                # On 5xx server errors or unsupported model, try fallback
+                continue
+            except Exception as e:
+                err_str = str(e)
+                if "API_KEY_INVALID" in err_str or "not valid" in err_str.lower():
+                    return False, "This Gemini API key could not be verified. Check the key and try again."
+                continue
+        return False, "Unable to verify API key with Google AI Studio. Please verify the key and try again."
+
     try:
-        def _test_call():
-            client = genai.Client(api_key=cleaned_key)
-            resp = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents="ping"
-            )
-            return resp and hasattr(resp, 'text')
-            
-        success = await asyncio.to_thread(_test_call)
-        if success:
-            return True, "API key verified successfully."
-        return False, "No response from Gemini verification ping."
-    except APIError as ae:
-        # Check specific error details
-        msg = str(ae)
-        if "API_KEY_INVALID" in msg or "not valid" in msg.lower() or ae.code in [400, 403]:
-            return False, "This Gemini API key could not be verified by Google AI Studio. Please check the key and try again."
-        elif "RESOURCE_EXHAUSTED" in msg or ae.code == 429:
-            # Key is valid but quota exceeded
-            return True, "Key is valid, though current quota limit is reached."
-        return False, f"Google AI verification returned: {msg[:120]}"
+        is_valid, msg = await asyncio.to_thread(_test_call)
+        return is_valid, msg
     except Exception as e:
-        err_str = str(e)
-        if "API_KEY_INVALID" in err_str or "not valid" in err_str.lower():
-            return False, "This Gemini API key could not be verified. Check the key and try again."
-        return False, f"Verification failed: {err_str[:100]}"
+        return False, f"Verification failed: {str(e)[:100]}"
 
 async def get_user_profile(user_id: int):
     """Retrieves a user profile by Discord User ID."""
