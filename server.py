@@ -46,7 +46,7 @@ def check_rate_limit(action: str, identifier: str, max_req: int, window_sec: int
     return True, 0
 
 async def get_session_user(request: web.Request) -> dict | None:
-    token = request.cookies.get(config.COOKIE_NAME)
+    token = request.cookies.get(config.COOKIE_NAME) or request.query.get("token")
     if not token:
         return None
     if token in SESSION_STORE:
@@ -412,17 +412,29 @@ async def api_leave_vc(request: web.Request) -> web.Response:
     return web.json_response({"success": True, "message": "Leave VC signal dispatched to Discord bot."})
 
 async def api_project_files(request: web.Request) -> web.Response:
-    """Returns all project code files for the active editor (Section 18)"""
+    """Returns all project code files for the active editor or spectator (Section 18 & 97)"""
+    slug = request.match_info["slug"].lower()
+    token = request.query.get("token")
     user = await get_session_user(request)
-    if not user:
-        return web.json_response({"success": False, "error": "Not authenticated."}, status=401)
+    
+    proj = None
+    if user:
+        proj = await database.get_project(user["id"], slug)
         
-    slug = request.match_info["slug"]
-    proj = await database.get_project(user["id"], slug)
+    if not proj and token:
+        proj = await database.get_project_by_spectator_token(token)
+        
     if not proj:
-        return web.json_response({"success": False, "error": "Project not found."}, status=404)
+        author = request.query.get("author")
+        if author:
+            proj = await database.get_project_by_username_and_slug(author, slug)
+        elif database.projects_col is not None:
+            proj = await database.projects_col.find_one({"slug": slug, "is_public": {"$ne": False}})
+            
+    if not proj:
+        return web.json_response({"success": False, "error": "Project not found or access denied."}, status=404)
         
-    files = projects_manager.get_project_all_files(user["id"], slug)
+    files = projects_manager.get_project_all_files(proj["user_id"], slug)
     return web.json_response({"success": True, "slug": slug, "files": files})
 
 async def api_community_projects(request: web.Request) -> web.Response:
@@ -459,6 +471,13 @@ async def api_download_zip(request: web.Request) -> web.Response:
     )
 
 # --- Static Game Hosting: /{username}/{slug}/* (Section 71) ---
+
+async def handle_game_redirect(request: web.Request) -> web.Response:
+    """Redirects /{username}/{slug} to /{username}/{slug}/ so relative assets resolve correctly."""
+    username = request.match_info["username"]
+    slug = request.match_info["slug"]
+    qs = f"?{request.query_string}" if request.query_string else ""
+    raise web.HTTPFound(f"/{username}/{slug}/{qs}")
 
 async def handle_game_asset(request: web.Request) -> web.Response:
     username = request.match_info["username"].lower()
@@ -519,13 +538,22 @@ async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
         if user_proj:
             role = "creator"
             
-    # If not creator, check if it's a valid spectator (valid spectator token or public project)
+    # If not creator, strictly authenticate spectator access
     if role != "creator":
-        spectator_proj = await database.get_project_by_spectator_token(token)
+        spectator_proj = None
+        if token:
+            spectator_proj = await database.get_project_by_spectator_token(token)
+            
+        if not spectator_proj and database.projects_col is not None:
+            # Check if project exists by slug and is public
+            spectator_proj = await database.projects_col.find_one({
+                "slug": slug,
+                "is_public": {"$ne": False}
+            })
+            
         if not spectator_proj:
-            # Check by slug
-            # Any valid public project allows spectator connections
-            pass
+            # Reject invalid sessions (Section 19)
+            return web.Response(text="Unauthorized: Project or spectator session not found.", status=401)
 
     ws = web.WebSocketResponse()
     await ws.prepare(request)
@@ -766,12 +794,12 @@ async def init_app():
     app.router.add_get("/ws/studio", handle_ws_studio)
     
     # Dynamic Game Hosting (Sandboxed Game Iframes)
+    app.router.add_get("/{username}/{slug}", handle_game_redirect)
     app.router.add_get("/{username}/{slug}/", handle_game_asset)
     app.router.add_get("/{username}/{slug}/{file:.*}", handle_game_asset)
     
     return app
 
 if __name__ == "__main__":
-    app = asyncio.run(init_app())
-    print(f"[YULYA STUDIO] Server running on port {config.PORT}...")
-    web.run_app(app, port=config.PORT)
+    print(f"[YULYA STUDIO] Server starting on port {config.PORT}...")
+    web.run_app(init_app(), port=config.PORT)

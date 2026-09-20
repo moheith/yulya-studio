@@ -10,10 +10,16 @@ DANGEROUS_PATTERNS = [
     re.compile(r'parent\.document', re.IGNORECASE),
     re.compile(r'top\.document', re.IGNORECASE),
     re.compile(r'window\.opener', re.IGNORECASE),
+    re.compile(r'window\.parent', re.IGNORECASE),
+    re.compile(r'window\.top', re.IGNORECASE),
     re.compile(r'document\.cookie', re.IGNORECASE),
     re.compile(r'localStorage', re.IGNORECASE),
     re.compile(r'sessionStorage', re.IGNORECASE),
     re.compile(r'indexedDB', re.IGNORECASE),
+    re.compile(r'XMLHttpRequest', re.IGNORECASE),
+    re.compile(r'fetch\s*\(', re.IGNORECASE),
+    re.compile(r'eval\s*\(', re.IGNORECASE),
+    re.compile(r'Function\s*\(', re.IGNORECASE),
 ]
 
 def sanitize_game_code(content: str) -> tuple[str, list[str]]:

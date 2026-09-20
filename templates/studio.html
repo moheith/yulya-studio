@@ -587,6 +587,18 @@
     </div>
   </div>
 
+  <!-- Command Palette Modal (Section 64) -->
+  <div class="modal-backdrop" id="commandPaletteModal">
+    <div class="modal-content command-palette">
+      <div class="palette-input-wrap">
+        <span id="paletteSearchIcon"></span>
+        <input type="text" id="paletteSearchInput" placeholder="Type a command or search action (e.g. Restart, Share, ZIP)..." autocomplete="off">
+        <kbd style="font-family: var(--font-code); font-size: 11px; padding: 2px 6px; background-color: var(--bg-deepest); border: 1px solid var(--border-subtle); border-radius: 4px; color: var(--text-tertiary);">ESC</kbd>
+      </div>
+      <div class="palette-list" id="paletteList"></div>
+    </div>
+  </div>
+
   <!-- Idle Warning Modal (Section 22) -->
   <div class="modal-backdrop" id="idleModal">
     <div class="modal-content">
@@ -625,6 +637,8 @@
     document.getElementById('closeNewProjIcon').innerHTML = Icons.x('icon-sm');
     document.getElementById('closeDelIcon').innerHTML = Icons.x('icon-sm');
     document.getElementById('closeLeaveIcon').innerHTML = Icons.x('icon-sm');
+    const palIcon = document.getElementById('paletteSearchIcon');
+    if (palIcon) palIcon.innerHTML = Icons.terminal('icon-sm');
 
     // Studio State
     let activeTab = 'terminal';
@@ -819,10 +833,30 @@
       label.textContent = text;
     }
 
-    // Command Input
+    // Command Input & History (Section 47)
+    let commandHistory = [];
+    let historyIndex = -1;
+
     document.getElementById('commandInput').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
         sendCommand();
+      } else if (e.key === 'ArrowUp') {
+        if (commandHistory.length > 0) {
+          if (historyIndex === -1) historyIndex = commandHistory.length - 1;
+          else if (historyIndex > 0) historyIndex--;
+          e.target.value = commandHistory[historyIndex] || '';
+        }
+      } else if (e.key === 'ArrowDown') {
+        if (historyIndex !== -1) {
+          if (historyIndex < commandHistory.length - 1) {
+            historyIndex++;
+            e.target.value = commandHistory[historyIndex];
+          } else {
+            historyIndex = -1;
+            e.target.value = '';
+          }
+        }
       }
     });
 
@@ -831,6 +865,8 @@
       const prompt = input.value.trim();
       if (!prompt) return;
       input.value = '';
+      commandHistory.push(prompt);
+      historyIndex = -1;
 
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         commandQueue.push(prompt);
@@ -966,10 +1002,10 @@
         e.preventDefault();
         activatePTT();
       }
-      // Command palette shortcut Ctrl+K / Cmd+K
+      // Command palette shortcut Ctrl+K / Cmd+K (Section 64)
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        toggleProjectModal();
+        openCommandPalette();
       }
     });
 
@@ -1088,8 +1124,102 @@
       }
     }
 
+    // Command Palette (Section 64)
+    const PALETTE_ACTIONS = [
+      { id: 'new_proj', title: 'Create Project', shortcut: 'Ctrl+N', action: () => openNewProjectModal() },
+      { id: 'switch_proj', title: 'Switch Project', shortcut: 'P', action: () => toggleProjectModal() },
+      { id: 'restart_game', title: 'Restart Game Preview', shortcut: 'R', action: () => restartPreview() },
+      { id: 'share_game', title: 'Share Game Link', shortcut: 'S', action: () => shareProjectLink() },
+      { id: 'download_zip', title: 'Download Project ZIP', shortcut: 'D', action: () => downloadZip() },
+      { id: 'reconnect_ws', title: 'Reconnect WebSocket', shortcut: 'C', action: () => connectWS() },
+      { id: 'toggle_terminal', title: 'Toggle Terminal / Code View', shortcut: 'T', action: () => switchTab(activeTab === 'terminal' ? 'app.js' : 'terminal') },
+      { id: 'open_preview', title: 'Open Preview in New Tab', shortcut: 'O', action: () => openGameNewTab() },
+      { id: 'leave_session', title: 'Leave Studio Session (Voice Channel)', shortcut: 'L', action: () => openLeaveModal() }
+    ];
+
+    let paletteSelectedIndex = 0;
+
+    function openCommandPalette() {
+      ModalManager.open('commandPaletteModal');
+      const input = document.getElementById('paletteSearchInput');
+      input.value = '';
+      paletteSelectedIndex = 0;
+      renderPaletteItems();
+      setTimeout(() => input.focus(), 50);
+    }
+
+    function renderPaletteItems(filterText = '') {
+      const list = document.getElementById('paletteList');
+      list.innerHTML = '';
+      const query = filterText.toLowerCase();
+      const filtered = PALETTE_ACTIONS.filter(item => item.title.toLowerCase().includes(query));
+
+      if (filtered.length === 0) {
+        const empty = document.createElement('div');
+        empty.style.padding = 'var(--space-3)';
+        empty.style.color = 'var(--text-tertiary)';
+        empty.style.fontSize = '12px';
+        empty.style.textAlign = 'center';
+        empty.textContent = 'No matching commands';
+        list.appendChild(empty);
+        return;
+      }
+
+      if (paletteSelectedIndex >= filtered.length) paletteSelectedIndex = 0;
+
+      filtered.forEach((item, idx) => {
+        const el = document.createElement('div');
+        el.className = `palette-item ${idx === paletteSelectedIndex ? 'active' : ''}`;
+        
+        const titleSpan = document.createElement('span');
+        titleSpan.textContent = item.title;
+        
+        const kbd = document.createElement('kbd');
+        kbd.textContent = item.shortcut;
+        
+        el.appendChild(titleSpan);
+        el.appendChild(kbd);
+        
+        el.onclick = () => {
+          ModalManager.close('commandPaletteModal');
+          item.action();
+        };
+        list.appendChild(el);
+      });
+    }
+
+    const paletteInput = document.getElementById('paletteSearchInput');
+    if (paletteInput) {
+      paletteInput.addEventListener('input', (e) => {
+        paletteSelectedIndex = 0;
+        renderPaletteItems(e.target.value);
+      });
+
+      paletteInput.addEventListener('keydown', (e) => {
+        const list = document.getElementById('paletteList');
+        const items = list.querySelectorAll('.palette-item');
+        if (items.length === 0) return;
+
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          paletteSelectedIndex = (paletteSelectedIndex + 1) % items.length;
+          renderPaletteItems(e.target.value);
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          paletteSelectedIndex = (paletteSelectedIndex - 1 + items.length) % items.length;
+          renderPaletteItems(e.target.value);
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          const activeItem = items[paletteSelectedIndex];
+          if (activeItem) activeItem.click();
+        }
+      });
+    }
+
     function shareProjectLink() {
-      const url = `${window.location.origin}/spectate/${USERNAME}/${ACTIVE_SLUG}`;
+      const url = SPECTATOR_TOKEN
+        ? `${window.location.origin}/spectate/${SPECTATOR_TOKEN}`
+        : `${window.location.origin}/spectate/${USERNAME}/${ACTIVE_SLUG}`;
       copyToClipboard(url, 'Spectator stream link copied to clipboard');
     }
 

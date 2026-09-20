@@ -7,12 +7,14 @@ import asyncio
 import io
 import zipfile
 from pathlib import Path
+from unittest.mock import MagicMock, AsyncMock
 
 import config
 import database
 import projects_manager
 import ai_engine
 import server
+from aiohttp.test_utils import make_mocked_request
 
 async def run_tests():
     print("=== STARTING YULYA STUDIO TEST SUITE ===")
@@ -53,7 +55,7 @@ async def run_tests():
             resp = await server.render_template(tmpl, ctx)
             assert_true(resp.status == 200 and len(resp.text) > 200, f"Rendered {tmpl} with ctx={list(ctx.keys())}")
             
-            # Verify Iframe Sandbox in templates
+            # Verify Iframe Sandbox in templates (allow-scripts ONLY, strictly no allow-same-origin)
             if tmpl in ["studio.html", "spectator.html"]:
                 assert_true('sandbox="allow-scripts"' in resp.text, f"Iframe has sandbox='allow-scripts' in {tmpl}")
             elif tmpl == "index.html":
@@ -64,6 +66,16 @@ async def run_tests():
             forbidden_emojis = ["🎮", "🚀", "🎙️", "⚡", "🤖", "🔥", "🕹️"]
             found_emojis = [e for e in forbidden_emojis if e in resp.text]
             assert_true(len(found_emojis) == 0, f"Zero forbidden emojis in {tmpl} (found: {found_emojis})")
+            
+            # Specific template component checks
+            if tmpl == "studio.html":
+                assert_true('id="commandPaletteModal"' in resp.text, "Command Palette modal exists in studio.html")
+                assert_true('paletteSearchInput' in resp.text, "Command Palette input exists in studio.html")
+            elif tmpl == "spectator.html":
+                assert_true('id="codeEditorWrap"' in resp.text, "Code viewer wrapper exists in spectator.html")
+                assert_true('tabApp' in resp.text and 'tabIndex' in resp.text, "File tabs exist in spectator.html")
+            elif tmpl == "index.html":
+                assert_true('author.innerHTML' not in resp.text, "XSS-safe author DOM construction in index.html")
             
         except Exception as e:
             assert_true(False, f"Failed rendering {tmpl}: {e}")
@@ -109,10 +121,29 @@ async def run_tests():
             oversized_caught = True
         assert_true(oversized_caught, "Oversized file (>512 KB) blocked")
         
-        # Code sanitization check
-        malicious_code = "console.log(parent.document.cookie); localStorage.setItem('key', 'val');"
-        sanitized, warnings = projects_manager.sanitize_game_code(malicious_code)
-        assert_true("parent.document" not in sanitized and "localStorage" not in sanitized, "Dangerous parent/storage access sanitized")
+        # Comprehensive Section 26 Code sanitization checks
+        patterns_to_test = [
+            ("parent.document.cookie", "parent.document"),
+            ("top.document.location", "top.document"),
+            ("window.opener.postMessage()", "window.opener"),
+            ("window.parent.location", "window.parent"),
+            ("window.top.location", "window.top"),
+            ("document.cookie = 'x=1'", "document.cookie"),
+            ("localStorage.getItem('x')", "localStorage"),
+            ("sessionStorage.setItem('x', '1')", "sessionStorage"),
+            ("new XMLHttpRequest()", "XMLHttpRequest"),
+            ("fetch('https://evil.com')", "fetch"),
+            ("eval('bad()')", "eval"),
+            ("Function('bad()')", "Function"),
+        ]
+        all_sanitized = True
+        for snippet, name in patterns_to_test:
+            san, _ = projects_manager.sanitize_game_code(f"function run() {{ {snippet}; }}")
+            if name in san:
+                all_sanitized = False
+                print(f"  [FAIL] Sanitizer did not neutralize: {name}")
+                break
+        assert_true(all_sanitized, "All Section 26 dangerous escape & network patterns neutralized")
         
         # ZIP generation
         zip_buf = projects_manager.create_zip_archive(test_user_id, test_slug)
@@ -162,16 +193,44 @@ async def run_tests():
             "/api/delete-project",
             "/api/leave-vc",
             "/api/community-projects",
-            "/ws/studio"
+            "/api/project-files/{slug}",
+            "/api/download-zip/{username}/{slug}",
+            "/ws/studio",
+            "/{username}/{slug}",
+            "/{username}/{slug}/"
         ]
         for er in expected_routes:
-            assert_true(any(er in r for r in routes), f"Route registered: {er}")
+            assert_true(any(er == r or er in r for r in routes), f"Route registered: {er}")
             
         # Test middleware security headers
         middlewares = app.middlewares
         assert_true(len(middlewares) > 0, "Security headers middleware installed")
     except Exception as e:
         assert_true(False, f"App initialization error: {e}")
+
+    # 5. Routing & WebSocket Security Checks
+    print("\n5. Testing URL Redirects & WebSocket Rejection...")
+    try:
+        # Test game redirect without trailing slash
+        req_redir = make_mocked_request("GET", "/moheith/neon-dodge", match_info={"username": "moheith", "slug": "neon-dodge"}, app=app)
+        try:
+            await server.handle_game_redirect(req_redir)
+            assert_true(False, "handle_game_redirect should raise HTTPFound")
+        except server.web.HTTPFound as redirect:
+            assert_true(redirect.location == "/moheith/neon-dodge/", f"Redirects to trailing slash: {redirect.location}")
+
+        # Test WebSocket rejection for unauthorized spectator with invalid slug/token
+        req_bad_ws = make_mocked_request(
+            "GET",
+            "/ws/studio?slug=nonexistent-game-xyz-999&token=bogus_token&role=spectator",
+            headers={"Upgrade": "websocket", "Connection": "Upgrade"},
+            app=app
+        )
+        ws_res = await server.handle_ws_studio(req_bad_ws)
+        assert_true(isinstance(ws_res, server.web.Response) and ws_res.status == 401, "Rejected invalid spectator WebSocket connection with 401")
+
+    except Exception as e:
+        assert_true(False, f"Routing & WebSocket error: {e}")
 
     print(f"\n=== TEST SUITE COMPLETED: {tests_passed} PASSED, {tests_failed} FAILED ===")
     return tests_failed == 0

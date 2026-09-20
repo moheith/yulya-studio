@@ -155,14 +155,21 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
                     "error": "No valid game files (HTML, CSS, JS) were generated."
                 }
                 
+            # Preserve existing project title and tags if present
+            existing_proj = await database.get_project(user_id, slug)
+            existing_title = existing_proj.get("title") if existing_proj else None
+            project_title = existing_title or slug.replace("-", " ").title()
+            existing_tags = existing_proj.get("tags") if existing_proj else None
+
             # Update database record
             await database.save_project(
                 user_id=user_id,
                 username=username,
                 slug=slug,
-                title=slug.replace("-", " ").title(),
+                title=project_title,
                 description=summary,
-                files=saved_files
+                files=saved_files,
+                tags=existing_tags
             )
             
             # Read back saved files

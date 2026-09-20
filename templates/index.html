@@ -389,7 +389,10 @@
 
           const author = document.createElement('div');
           author.className = 'card-author';
-          author.innerHTML = `By <span>@${game.username}</span>`;
+          author.textContent = 'By ';
+          const authorSpan = document.createElement('span');
+          authorSpan.textContent = `@${game.username}`;
+          author.appendChild(authorSpan);
 
           const desc = document.createElement('p');
           desc.className = 'card-desc';
