@@ -393,8 +393,8 @@
         <span id="downloadIcon"></span> ZIP
       </button>
       <span class="text-xs text-muted font-mono" style="margin-left: 4px;">@{{ user.username }}</span>
-      <button class="btn btn-danger btn-sm" onclick="openLeaveModal()">
-        <span id="logoutIcon"></span> Leave VC
+      <button class="btn btn-secondary btn-sm" onclick="openLeaveModal()">
+        <span id="logoutIcon"></span> Exit
       </button>
     </div>
   </header>
@@ -445,7 +445,7 @@
           <div class="log-line">
             <span class="log-time">00:00:00</span>
             <span class="log-badge thinking">AI</span>
-            <span class="log-msg">Gemini 2.5 Flash Engine online. Hold Spacebar to speak or enter commands below.</span>
+            <span class="log-msg">Gemini Flash Engine online. Enter commands below to build or modify your game.</span>
           </div>
         </div>
       </div>
@@ -570,19 +570,19 @@
     </div>
   </div>
 
-  <!-- Leave VC Modal (Section 54) -->
+  <!-- Exit Studio Modal -->
   <div class="modal-backdrop" id="leaveModal">
     <div class="modal-content">
       <div class="modal-header">
-        <h3 class="modal-title">Leave Studio?</h3>
+        <h3 class="modal-title">Exit Studio?</h3>
         <button class="btn btn-outline btn-sm btn-icon" onclick="ModalManager.close('leaveModal')"><span id="closeLeaveIcon"></span></button>
       </div>
       <div class="modal-body">
-        This will disconnect Yulya from the Discord Voice Channel. Your game code and spectator links will remain securely saved in your profile.
+        Return to the main hub? Your game code, active projects, and spectator links remain safely saved in your profile.
       </div>
       <div class="modal-actions">
         <button class="btn btn-secondary btn-sm" onclick="ModalManager.close('leaveModal')">Cancel</button>
-        <button class="btn btn-danger btn-sm" onclick="confirmLeaveVC()">Leave Session</button>
+        <button class="btn btn-danger btn-sm" onclick="confirmLeaveVC()">Exit Workspace</button>
       </div>
     </div>
   </div>
@@ -1117,8 +1117,8 @@
     async function confirmLeaveVC() {
       try {
         await fetch('/api/leave-vc', { method: 'POST' });
-        ToastManager.show('Disconnected from Voice Channel', 'info');
-        setTimeout(() => { window.location.href = '/'; }, 500);
+        ToastManager.show('Workspace saved', 'info');
+        setTimeout(() => { window.location.href = '/'; }, 300);
       } catch (e) {
         window.location.href = '/';
       }
@@ -1134,7 +1134,7 @@
       { id: 'reconnect_ws', title: 'Reconnect WebSocket', shortcut: 'C', action: () => connectWS() },
       { id: 'toggle_terminal', title: 'Toggle Terminal / Code View', shortcut: 'T', action: () => switchTab(activeTab === 'terminal' ? 'app.js' : 'terminal') },
       { id: 'open_preview', title: 'Open Preview in New Tab', shortcut: 'O', action: () => openGameNewTab() },
-      { id: 'leave_session', title: 'Leave Studio Session (Voice Channel)', shortcut: 'L', action: () => openLeaveModal() }
+      { id: 'leave_session', title: 'Exit Studio Workspace', shortcut: 'L', action: () => openLeaveModal() }
     ];
 
     let paletteSelectedIndex = 0;
