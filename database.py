@@ -66,7 +66,7 @@ async def verify_google_ai_studio_key(api_key: str) -> tuple[bool, str]:
     
     def _test_call():
         client = genai.Client(api_key=cleaned_key)
-        for model_name in ["gemma-4-31b-it", "gemini-2.5-flash"]:
+        for model_name in ["gemini-3.6-flash", "gemini-3.8-flash", "gemma-4-31b-it", "gemini-2.5-flash"]:
             try:
                 resp = client.models.generate_content(
                     model=model_name,

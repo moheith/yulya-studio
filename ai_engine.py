@@ -81,7 +81,7 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
         def _call_gemini():
             client = genai.Client(api_key=cleaned_key)
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-3.6-flash",
                 contents=json.dumps(context_payload),
                 config=types.GenerateContentConfig(
                     system_instruction=SYSTEM_PROMPT,
