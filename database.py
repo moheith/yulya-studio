@@ -115,10 +115,24 @@ async def verify_google_ai_studio_key(api_key: str) -> tuple[bool, str]:
 verify_gemini_api_key = verify_google_ai_studio_key
 
 async def get_user_profile(user_id: int):
-    """Retrieves a user profile by Discord User ID."""
+    """Retrieves a user profile by Discord User ID (handles int and string representations)."""
     if users_col is None:
         return None
-    return await users_col.find_one({"user_id": int(user_id)})
+    try:
+        uid_int = int(user_id)
+    except (ValueError, TypeError):
+        uid_int = None
+    uid_str = str(user_id)
+    query_or = []
+    if uid_int is not None:
+        query_or.append({"user_id": uid_int})
+    query_or.append({"user_id": uid_str})
+    
+    # Prioritize document with studio_api_key
+    doc = await users_col.find_one({"$or": query_or, "studio_api_key": {"$exists": True, "$ne": ""}})
+    if not doc:
+        doc = await users_col.find_one({"$or": query_or})
+    return doc
 
 # --- Studio Profiles Management (Dedicated user profile & game tracking) ---
 

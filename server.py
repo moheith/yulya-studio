@@ -736,11 +736,12 @@ Current Game Repository Files:
 
         client = genai.Client(api_key=api_key.strip())
         session = None
-        connected_model = "Gemini 3.8 Live Extended Thinking (High)"
+        cm = None
+        connected_model = "Gemini 3.8 Live"
         
-        for live_model in ["gemini-2.0-flash-exp", "gemini-2.0-flash", "models/gemini-2.0-flash-exp"]:
+        for live_model in ["gemini-3.8-live", "gemini-3.1-flash-live-preview", "gemini-2.5-flash-native-audio-latest"]:
             try:
-                session = await client.aio.live.connect(
+                live_cm = client.aio.live.connect(
                     model=live_model,
                     config=types.LiveConnectConfig(
                         response_modalities=["AUDIO"],
@@ -748,7 +749,10 @@ Current Game Repository Files:
                         tools=[modify_tool]
                     )
                 )
+                session = await live_cm.__aenter__()
                 if session:
+                    cm = live_cm
+                    connected_model = f"Gemini 3.8 Live ({live_model})"
                     break
             except Exception as e:
                 print(f"[LIVE] Connection attempt to {live_model} failed: {e}")
@@ -766,6 +770,7 @@ Current Game Repository Files:
         receive_task = asyncio.create_task(_live_receive_loop(ws, slug, session, api_key, session_user))
         ACTIVE_LIVE_SESSIONS[ws] = {
             "session": session,
+            "cm": cm,
             "receive_task": receive_task,
             "slug": slug,
             "client": client
@@ -886,7 +891,13 @@ async def stop_gemini_live_session(ws: web.WebSocketResponse):
                     await task
                 except asyncio.CancelledError:
                     pass
-            if session:
+            cm = item.get("cm")
+            if cm:
+                try:
+                    await cm.__aexit__(None, None, None)
+                except Exception:
+                    pass
+            elif session:
                 try:
                     await session.close()
                 except Exception:

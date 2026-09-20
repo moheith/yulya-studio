@@ -137,6 +137,7 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
             # 4. gemini-3.5-flash (20 RPD) -> fallback 3
             # 5. gemini-3.5-flash-lite (500 RPD) -> fallback 4
             # 6. gemini-3.1-flash-lite (500 RPD) -> fallback 5
+            search_available = True
             for model_name in [
                 "gemini-3.8-flash",
                 "gemini-3.7-flash",
@@ -145,8 +146,9 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
                 "gemini-3.5-flash-lite",
                 "gemini-3.1-flash-lite"
             ]:
+                search_attempts = [True, False] if search_available else [False]
                 # Try with Search Grounding tool first, then fallback to standard prompt
-                for use_search in [True, False]:
+                for use_search in search_attempts:
                     try:
                         cfg_kwargs = {
                             "system_instruction": SYSTEM_PROMPT,
@@ -166,11 +168,12 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
                     except APIError as ae:
                         last_err = ae
                         err_str = str(ae)
-                        # If search grounding is rejected with response_mime_type on this model, retry without search
-                        if use_search and ("grounding" in err_str.lower() or "tool" in err_str.lower() or ae.code == 400):
+                        # If search grounding failed for ANY reason (quota 429, tool rejection, etc.), fall back immediately to use_search=False
+                        if use_search:
+                            search_available = False
                             continue
-                        # If 429 quota exhausted or 404 on this model, move to next model in waterfall
-                        if "RESOURCE_EXHAUSTED" in err_str or ae.code in (429, 404):
+                        # If standard prompt (use_search=False) hits quota limit (429), model retirement (404), or server demand spikes (500-504), cascade to next model in waterfall
+                        if "RESOURCE_EXHAUSTED" in err_str or ae.code in (429, 404, 500, 502, 503, 504):
                             break
                         # If invalid API key (400, 403), stop immediately
                         if "API_KEY_INVALID" in err_str or ae.code in (400, 403):
@@ -179,6 +182,7 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
                     except Exception as e:
                         last_err = e
                         if use_search:
+                            search_available = False
                             continue
                         break
             if last_err:
@@ -186,10 +190,10 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
             raise RuntimeError("All models in the generation waterfall failed.")
             
         try:
-            # 50 second timeout on AI code generation (Section 85)
-            raw_response = await asyncio.wait_for(asyncio.to_thread(_call_gemini), timeout=50.0)
+            # 90 second timeout on AI code generation across the multi-model waterfall
+            raw_response = await asyncio.wait_for(asyncio.to_thread(_call_gemini), timeout=90.0)
         except asyncio.TimeoutError:
-            err_msg = "Google AI Studio request timed out after 50 seconds."
+            err_msg = "Google AI Studio request timed out after 90 seconds."
             fail_step = f"[FAIL] {err_msg}"
             projects_manager.write_build_log(user_id_int, safe_slug, "FAIL", fail_step)
             if log_callback:
