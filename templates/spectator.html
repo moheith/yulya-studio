@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spectating {{ title }} by @{{ author }} | Yulya Studio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #070314;
+      --panel: #0d0620;
+      --panel-border: rgba(155, 89, 182, 0.3);
+      --cyan: #00f0ff;
+      --pink: #ff007f;
+      --green: #39ff14;
+      --text: #ffffff;
+      --muted: #8888aa;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Space Grotesk', sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    header {
+      height: 56px;
+      background: rgba(13, 6, 32, 0.95);
+      border-bottom: 1px solid var(--panel-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+    }
+    .logo {
+      font-size: 1.1rem;
+      font-weight: 700;
+    }
+    .logo span {
+      background: linear-gradient(135deg, var(--cyan), var(--pink));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .badge-live {
+      background: rgba(255, 0, 127, 0.2);
+      border: 1px solid var(--pink);
+      color: var(--pink);
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--pink);
+      box-shadow: 0 0 8px var(--pink);
+      animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse { 0% { opacity: 0.4; } 50% { opacity: 1; } 100% { opacity: 0.4; } }
+
+    .workspace {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 420px 1fr;
+      overflow: hidden;
+    }
+    .pane {
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid var(--panel-border);
+      overflow: hidden;
+      background: var(--panel);
+    }
+    .pane:last-child { border-right: none; }
+    .pane-header {
+      height: 40px;
+      background: rgba(7, 3, 20, 0.8);
+      border-bottom: 1px solid var(--panel-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    .code-view {
+      flex: 1;
+      overflow: auto;
+      padding: 14px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+      line-height: 1.5;
+      color: #ccc;
+      white-space: pre-wrap;
+      word-break: break-all;
+      background: #050110;
+    }
+    .preview-container {
+      flex: 1;
+      background: #000;
+      position: relative;
+    }
+    iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+    .btn {
+      padding: 4px 12px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid var(--cyan);
+      background: transparent;
+      color: var(--cyan);
+      text-decoration: none;
+    }
+    .btn:hover {
+      background: rgba(0, 240, 255, 0.1);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div style="display: flex; align-items: center; gap: 14px;">
+      <a href="/" class="logo" style="text-decoration: none; color: inherit;">🎮 <span>YULYA STUDIO</span></a>
+      <span style="font-size: 0.85rem; color: var(--muted);">Spectating: <strong style="color: #fff;">{{ title }}</strong> by <span style="color: var(--pink);">@{{ author }}</span></span>
+      <div class="badge-live"><div class="dot"></div> LIVE BUILD</div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <button class="btn" onclick="restartGame()">🔄 Reload Game</button>
+      <a href="/" class="btn">Arcade Gallery</a>
+    </div>
+  </header>
+
+  <div class="workspace">
+    <div class="pane">
+      <div class="pane-header">
+        <span style="color: var(--cyan);">⚡ Live Terminal & Code Stream</span>
+        <span id="connStatus" style="color: var(--green); font-size: 0.75rem;">🟢 Live</span>
+      </div>
+      <div id="codeDisplay" class="code-view">
+        <div style="color: var(--cyan); margin-bottom: 4px;">> [SPECTATOR] Connected to session of @{{ author }}.</div>
+        <div style="color: #d175ff; margin-bottom: 4px;">> Code updates and file changes will stream here in real time.</div>
+      </div>
+    </div>
+
+    <div class="pane">
+      <div class="pane-header">
+        <span style="color: var(--green);">🕹️ Playable Game (Play with your keyboard!)</span>
+        <span style="font-size: 0.75rem; color: var(--muted);">Auto-reloads on live code edits</span>
+      </div>
+      <div class="preview-container">
+        <iframe id="gameFrame" src="/{{ author }}/{{ slug }}/"></iframe>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const AUTHOR = "{{ author }}";
+    const SLUG = "{{ slug }}";
+
+    function restartGame() {
+      const frame = document.getElementById('gameFrame');
+      frame.src = `/${AUTHOR}/${SLUG}/?t=${Date.now()}`;
+    }
+
+    function logTerminal(text, color = '#eee') {
+      const term = document.getElementById('codeDisplay');
+      const line = document.createElement('div');
+      line.style.color = color;
+      line.style.marginBottom = '4px';
+      line.innerText = text;
+      term.appendChild(line);
+      term.scrollTop = term.scrollHeight;
+    }
+
+    // Connect Spectator WebSocket
+    function connectWS() {
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const ws = new WebSocket(`${proto}//${window.location.host}/ws/studio?slug=${SLUG}&spectator=1`);
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'log') {
+            logTerminal(data.message, '#00f0ff');
+          } else if (data.type === 'code_update') {
+            logTerminal(`> [CODE UPDATE] ${data.summary}`, '#39ff14');
+            restartGame();
+          }
+        } catch (e) {}
+      };
+
+      ws.onclose = () => {
+        document.getElementById('connStatus').innerText = '🔴 Reconnecting...';
+        document.getElementById('connStatus').style.color = '#ff007f';
+        setTimeout(connectWS, 3000);
+      };
+    }
+    connectWS();
+  </script>
+</body>
+</html>

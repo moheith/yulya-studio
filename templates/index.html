@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Yulya Studio | Arcade & AI Game Creator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #070314;
+      --panel: #0f0724;
+      --panel-border: rgba(155, 89, 182, 0.3);
+      --primary: #9b59b6;
+      --cyan: #00f0ff;
+      --pink: #ff007f;
+      --green: #39ff14;
+      --text: #ffffff;
+      --muted: #8888aa;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Space Grotesk', sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+      background-image: 
+        radial-gradient(circle at 15% 15%, rgba(155, 89, 182, 0.15) 0%, transparent 40%),
+        radial-gradient(circle at 85% 85%, rgba(0, 240, 255, 0.12) 0%, transparent 40%);
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1.5rem 3rem;
+      border-bottom: 1px solid var(--panel-border);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(7, 3, 20, 0.85);
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 1.4rem;
+      font-weight: 700;
+      letter-spacing: 1px;
+    }
+    .logo span {
+      background: linear-gradient(135deg, var(--cyan), var(--pink));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .nav-actions {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .btn {
+      padding: 10px 22px;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      text-decoration: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+      border: none;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--pink), var(--primary));
+      color: white;
+      box-shadow: 0 0 15px rgba(255, 0, 127, 0.4);
+    }
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 0 25px rgba(255, 0, 127, 0.7);
+    }
+    .btn-outline {
+      background: transparent;
+      border: 1px solid var(--cyan);
+      color: var(--cyan);
+    }
+    .btn-outline:hover {
+      background: rgba(0, 240, 255, 0.1);
+      box-shadow: 0 0 15px rgba(0, 240, 255, 0.4);
+    }
+    .hero {
+      text-align: center;
+      padding: 5rem 1.5rem 3rem;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    .hero-badge {
+      display: inline-block;
+      padding: 6px 14px;
+      background: rgba(0, 240, 255, 0.1);
+      border: 1px solid var(--cyan);
+      color: var(--cyan);
+      border-radius: 20px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-bottom: 1.5rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .hero h1 {
+      font-size: 3.2rem;
+      line-height: 1.15;
+      margin-bottom: 1.5rem;
+    }
+    .hero h1 span {
+      background: linear-gradient(135deg, var(--cyan), var(--pink));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .hero p {
+      font-size: 1.2rem;
+      color: var(--muted);
+      line-height: 1.6;
+      margin-bottom: 2.5rem;
+    }
+    .gallery-container {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 2rem 2rem 5rem;
+    }
+    .gallery-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 2rem;
+      border-bottom: 1px solid var(--panel-border);
+      padding-bottom: 1rem;
+    }
+    .gallery-title {
+      font-size: 1.6rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .games-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 24px;
+    }
+    .game-card {
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 16px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transition: all 0.25s ease;
+      position: relative;
+    }
+    .game-card:hover {
+      transform: translateY(-4px);
+      border-color: var(--cyan);
+      box-shadow: 0 10px 25px rgba(0, 240, 255, 0.25);
+    }
+    .card-preview {
+      height: 180px;
+      background: #000;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .card-preview iframe {
+      width: 600px;
+      height: 360px;
+      transform: scale(0.5);
+      transform-origin: center;
+      border: none;
+      pointer-events: none;
+    }
+    .card-body {
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+    }
+    .card-title {
+      font-size: 1.25rem;
+      font-weight: 700;
+      margin-bottom: 6px;
+      color: #fff;
+    }
+    .card-author {
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+    .card-author span {
+      color: var(--pink);
+      font-weight: 600;
+    }
+    .card-desc {
+      font-size: 0.9rem;
+      color: #aaa;
+      line-height: 1.4;
+      margin-bottom: 18px;
+      flex: 1;
+    }
+    .card-actions {
+      display: flex;
+      gap: 10px;
+    }
+    .card-actions .btn {
+      flex: 1;
+      justify-content: center;
+      padding: 8px 12px;
+      font-size: 0.88rem;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">
+      🎮 <span>YULYA STUDIO</span>
+    </div>
+    <div class="nav-actions">
+      <a href="/studio" class="btn btn-primary">Launch Studio 🚀</a>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div class="hero-badge">AI Voice-Powered Game Studio</div>
+    <h1>Speak Your Games Into <span>Existence</span></h1>
+    <p>Talk naturally in Discord Voice with Gemini 3.8 Live Extended Thinking. Watch your games code themselves and deploy live to the world in real-time.</p>
+    <div style="display: flex; gap: 16px; justify-content: center;">
+      <a href="/studio" class="btn btn-primary" style="font-size: 1.1rem; padding: 14px 32px;">Start Building in VC 🎙️</a>
+      <a href="#arcade" class="btn btn-outline" style="font-size: 1.1rem; padding: 14px 28px;">Browse Arcade 🕹️</a>
+    </div>
+  </section>
+
+  <div id="arcade" class="gallery-container">
+    <div class="gallery-header">
+      <h2 class="gallery-title">🕹️ Community Arcade Showcase</h2>
+      <span style="color: var(--muted); font-size: 0.9rem;">Play directly in your browser or Discord Activity</span>
+    </div>
+    <div class="games-grid" id="gamesGrid">
+      <!-- Dynamic Games List Loaded via JS -->
+      <div style="grid-column: 1 / -1; text-align: center; padding: 3rem; color: var(--muted);">
+        Loading community creations...
+      </div>
+    </div>
+  </div>
+
+  <script>
+    async function loadGames() {
+      try {
+        const res = await fetch('/api/community-projects');
+        const games = await res.json();
+        const grid = document.getElementById('gamesGrid');
+        grid.innerHTML = '';
+
+        if (!games || games.length === 0) {
+          grid.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; padding: 3rem; color: var(--muted);">No games published yet. Be the first to build one!</div>';
+          return;
+        }
+
+        games.forEach(g => {
+          const card = document.createElement('div');
+          card.className = 'game-card';
+          const gameUrl = `/${g.username}/${g.slug}/`;
+          const spectateUrl = `/spectate/${g.username}/${g.slug}`;
+
+          card.innerHTML = `
+            <div class="card-preview">
+              <iframe src="${gameUrl}"></iframe>
+            </div>
+            <div class="card-body">
+              <div class="card-title">${g.title || g.slug}</div>
+              <div class="card-author">By <span>@${g.username}</span></div>
+              <div class="card-desc">${g.description || 'Interactive web game built with Yulya Studio.'}</div>
+              <div class="card-actions">
+                <a href="${gameUrl}" target="_blank" class="btn btn-primary">Play Game 🎮</a>
+                <a href="${spectateUrl}" class="btn btn-outline">Spectate HUD ⚡</a>
+              </div>
+            </div>
+          `;
+          grid.appendChild(card);
+        });
+      } catch (e) {
+        console.error('Failed to load arcade games:', e);
+      }
+    }
+    loadGames();
+  </script>
+</body>
+</html>

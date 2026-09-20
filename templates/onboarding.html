@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Yulya Studio Setup | Connect Gemini API Key</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #070314;
+      --panel: #0f0724;
+      --panel-border: rgba(155, 89, 182, 0.35);
+      --primary: #9b59b6;
+      --cyan: #00f0ff;
+      --pink: #ff007f;
+      --green: #39ff14;
+      --red: #ff3344;
+      --text: #ffffff;
+      --muted: #8888aa;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Space Grotesk', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+      background-image: 
+        radial-gradient(circle at 20% 20%, rgba(155, 89, 182, 0.2) 0%, transparent 45%),
+        radial-gradient(circle at 80% 80%, rgba(0, 240, 255, 0.15) 0%, transparent 45%);
+    }
+    .setup-card {
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 20px;
+      padding: 2.5rem;
+      max-width: 620px;
+      width: 100%;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6), 0 0 20px rgba(155, 89, 182, 0.2);
+      backdrop-filter: blur(16px);
+    }
+    .logo {
+      font-size: 1.5rem;
+      font-weight: 700;
+      text-align: center;
+      margin-bottom: 0.5rem;
+    }
+    .logo span {
+      background: linear-gradient(135deg, var(--cyan), var(--pink));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .subtitle {
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.95rem;
+      margin-bottom: 2rem;
+    }
+    .step {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
+      padding: 1.2rem;
+      margin-bottom: 1.2rem;
+    }
+    .step-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      color: var(--cyan);
+    }
+    .step-number {
+      background: var(--cyan);
+      color: #000;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.85rem;
+      font-weight: 700;
+    }
+    .step p {
+      font-size: 0.9rem;
+      color: #ccc;
+      line-height: 1.5;
+    }
+    .input-group {
+      margin-top: 0.8rem;
+    }
+    .input-group input {
+      width: 100%;
+      background: #050110;
+      border: 1px solid rgba(0, 240, 255, 0.4);
+      color: #fff;
+      padding: 12px 14px;
+      border-radius: 8px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.9rem;
+      outline: none;
+      transition: all 0.2s ease;
+    }
+    .input-group input:focus {
+      border-color: var(--pink);
+      box-shadow: 0 0 12px rgba(255, 0, 127, 0.4);
+    }
+    .terms-check {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin: 1.5rem 0;
+      cursor: pointer;
+    }
+    .terms-check input {
+      margin-top: 3px;
+      accent-color: var(--pink);
+      width: 16px;
+      height: 16px;
+      cursor: pointer;
+    }
+    .btn {
+      width: 100%;
+      padding: 14px;
+      border-radius: 10px;
+      font-weight: 700;
+      font-size: 1rem;
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      transition: all 0.2s ease;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--pink), var(--primary));
+      color: white;
+      box-shadow: 0 0 20px rgba(255, 0, 127, 0.4);
+    }
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 0 30px rgba(255, 0, 127, 0.7);
+    }
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+    .btn-discord {
+      background: #5865F2;
+      color: white;
+      box-shadow: 0 0 15px rgba(88, 101, 242, 0.4);
+    }
+    .btn-discord:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 0 25px rgba(88, 101, 242, 0.7);
+    }
+    .alert {
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      margin-bottom: 1.2rem;
+      display: none;
+    }
+    .alert-error {
+      background: rgba(255, 51, 68, 0.15);
+      border: 1px solid var(--red);
+      color: #ff8899;
+    }
+    .alert-success {
+      background: rgba(57, 255, 20, 0.15);
+      border: 1px solid var(--green);
+      color: #aaffaa;
+    }
+    .guide-link {
+      color: var(--cyan);
+      text-decoration: underline;
+      font-weight: 600;
+    }
+    .success-screen {
+      display: none;
+      text-align: center;
+    }
+    .success-icon {
+      font-size: 3.5rem;
+      margin-bottom: 1rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="setup-card">
+    <div class="logo">🎮 <span>YULYA STUDIO</span></div>
+    <div class="subtitle">Complete your 1-minute setup to start building games with voice</div>
+
+    <div id="alertBox" class="alert"></div>
+
+    {% if not user %}
+      <!-- State 1: Need to Login via Discord -->
+      <div style="text-align: center; padding: 1.5rem 0;">
+        <p style="color: var(--muted); margin-bottom: 1.5rem; line-height: 1.5;">
+          Log in with your Discord account so Yulya Studio can link your games and voice sessions directly to your Discord profile.
+        </p>
+        <a href="/auth/login" class="btn btn-discord">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994.021-.041.001-.09-.041-.106a13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.929 1.793 8.18 1.793 12.061 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.894.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.028zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/>
+          </svg>
+          Log in with Discord
+        </a>
+      </div>
+    {% else %}
+      <!-- State 2: Logged in, Need to input API Key -->
+      <div id="formSection">
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 1.5rem; padding: 10px 14px; background: rgba(0, 240, 255, 0.08); border-radius: 10px; border: 1px solid rgba(0, 240, 255, 0.2);">
+          <span style="font-size: 1.2rem;">👤</span>
+          <span style="font-size: 0.9rem;">Logged in as: <strong style="color: var(--cyan);">@{{ user.username }}</strong></span>
+        </div>
+
+        <div class="step">
+          <div class="step-header">
+            <div class="step-number">1</div>
+            <span>Get your Free Gemini API Key</span>
+          </div>
+          <p>
+            Go to <a href="https://aistudio.google.com/apikey" target="_blank" class="guide-link">Google AI Studio</a>, click <strong>"Create API Key"</strong>, and copy it. It's completely free and takes 10 seconds.
+          </p>
+        </div>
+
+        <div class="step">
+          <div class="step-header">
+            <div class="step-number">2</div>
+            <span>Paste your API Key</span>
+          </div>
+          <p>Paste the API key below. We will run a 1-second verification ping to make sure it works.</p>
+          <div class="input-group">
+            <input type="password" id="apiKeyInput" placeholder="AIzaSy... or AQ.Ab8RN..." autocomplete="off">
+          </div>
+        </div>
+
+        <label class="terms-check">
+          <input type="checkbox" id="termsCheck">
+          <span>I agree to the Yulya Studio Terms: I will not generate malicious software or cryptocurrency miners. I am responsible for my own Google API key quotas.</span>
+        </label>
+
+        <button id="saveKeyBtn" class="btn btn-primary" onclick="submitApiKey()">
+          Verify & Save API Key 🚀
+        </button>
+      </div>
+
+      <!-- State 3: Success Screen -->
+      <div id="successSection" class="success-screen">
+        <div class="success-icon">✨</div>
+        <h2 style="font-size: 1.6rem; color: var(--green); margin-bottom: 0.5rem;">Setup Complete!</h2>
+        <p style="color: var(--muted); margin-bottom: 1.5rem; line-height: 1.5;">
+          Your personal Gemini API key has been verified and saved to your profile.
+        </p>
+        <div style="background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 1.2rem; margin-bottom: 1.5rem;">
+          <h3 style="color: var(--cyan); font-size: 1rem; margin-bottom: 0.4rem;">Next Step:</h3>
+          <p style="font-size: 0.95rem; color: #fff;">
+            Return to Discord, join your voice channel, and type <code style="background: rgba(255, 0, 127, 0.2); color: var(--pink); padding: 3px 8px; border-radius: 4px; font-weight: bold;">/studio</code> in the VC chat!
+          </p>
+        </div>
+        <a href="/studio" class="btn btn-primary">Open My Workspace 🛠️</a>
+      </div>
+    {% endif %}
+  </div>
+
+  <script>
+    async function submitApiKey() {
+      const keyInput = document.getElementById('apiKeyInput');
+      const termsCheck = document.getElementById('termsCheck');
+      const btn = document.getElementById('saveKeyBtn');
+      const alertBox = document.getElementById('alertBox');
+
+      alertBox.style.display = 'none';
+
+      const key = keyInput.value.trim();
+      if (!key || key.length < 15) {
+        showAlert('Please paste a valid Gemini API key.', 'error');
+        return;
+      }
+      if (!termsCheck.checked) {
+        showAlert('You must accept the Studio Terms & Conditions.', 'error');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerText = 'Verifying key with Google AI... ⏳';
+
+      try {
+        const res = await fetch('/api/save-key', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ api_key: key })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          document.getElementById('formSection').style.display = 'none';
+          document.getElementById('successSection').style.display = 'block';
+        } else {
+          showAlert(data.error || 'Failed to verify API key.', 'error');
+          btn.disabled = false;
+          btn.innerText = 'Verify & Save API Key 🚀';
+        }
+      } catch (err) {
+        showAlert('Network error connecting to server.', 'error');
+        btn.disabled = false;
+        btn.innerText = 'Verify & Save API Key 🚀';
+      }
+    }
+
+    function showAlert(msg, type) {
+      const alertBox = document.getElementById('alertBox');
+      alertBox.className = `alert alert-${type}`;
+      alertBox.innerText = msg;
+      alertBox.style.display = 'block';
+    }
+  </script>
+</body>
+</html>
