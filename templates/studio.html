@@ -6,7 +6,7 @@
   <title>Yulya Studio — Workspace</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/css/studio.css?v=20260920">
   <style>
     body {
@@ -19,7 +19,7 @@
 
     /* Header */
     .studio-header {
-      height: 48px;
+      height: 52px;
       border-bottom: 1px solid var(--border-subtle);
       background-color: var(--bg-overlay);
       display: flex;
@@ -28,6 +28,7 @@
       padding: 0 var(--space-4);
       flex-shrink: 0;
       z-index: 20;
+      gap: var(--space-3);
     }
 
     .header-left, .header-center, .header-right {
@@ -50,19 +51,117 @@
       display: flex;
       align-items: center;
       gap: var(--space-2);
-      height: 28px;
+      height: 30px;
       padding: 0 var(--space-3);
       background-color: var(--bg-elevated);
       border: 1px solid var(--border-subtle);
       border-radius: var(--radius-sm);
       color: var(--text-primary);
       font-size: 13px;
-      font-weight: 500;
+      font-weight: 600;
       cursor: pointer;
+      transition: var(--transition-fast);
     }
 
     .project-menu-btn:hover {
       border-color: var(--border-active);
+      background-color: rgba(139, 92, 246, 0.1);
+    }
+
+    /* Status Pills */
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      font-size: 11.5px;
+      font-weight: 500;
+      background-color: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-secondary);
+      user-select: none;
+      white-space: nowrap;
+    }
+
+    .status-pill.live-ai-pill {
+      border-color: rgba(139, 92, 246, 0.35);
+      background: rgba(139, 92, 246, 0.08);
+      color: #e2e8f0;
+      font-weight: 600;
+    }
+
+    .status-pill.live-ai-pill.active {
+      border-color: #8b5cf6;
+      box-shadow: 0 0 12px rgba(139, 92, 246, 0.3);
+      background: rgba(139, 92, 246, 0.16);
+    }
+
+    .status-pill.waterfall-pill {
+      border-color: rgba(56, 189, 248, 0.3);
+      background: rgba(56, 189, 248, 0.06);
+      color: #93c5fd;
+      font-size: 11px;
+      font-family: var(--font-code);
+    }
+
+    .status-dot.listening {
+      background-color: #38bdf8;
+      box-shadow: 0 0 8px #38bdf8;
+      animation: pulse-ring 1.2s infinite ease-out;
+    }
+
+    .status-dot.speaking {
+      background-color: #c084fc;
+      box-shadow: 0 0 8px #c084fc;
+      animation: pulse-ring 1.2s infinite ease-out;
+    }
+
+    .status-dot.thinking {
+      background-color: #fbbf24;
+      box-shadow: 0 0 8px #fbbf24;
+      animation: pulse-ring 1.2s infinite ease-out;
+    }
+
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.3); opacity: 1; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+
+    /* Live AI Connect Button */
+    .btn-live-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 30px;
+      padding: 0 12px;
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: var(--transition-fast);
+      border: 1px solid rgba(139, 92, 246, 0.4);
+      background: rgba(139, 92, 246, 0.15);
+      color: #fff;
+    }
+
+    .btn-live-toggle:hover {
+      background: rgba(139, 92, 246, 0.3);
+      border-color: #a78bfa;
+      box-shadow: 0 0 12px rgba(139, 92, 246, 0.35);
+    }
+
+    .btn-live-toggle.connected {
+      background: rgba(244, 63, 94, 0.15);
+      border-color: rgba(244, 63, 94, 0.4);
+      color: #fca5a5;
+    }
+
+    .btn-live-toggle.connected:hover {
+      background: rgba(244, 63, 94, 0.3);
+      border-color: #f43f5e;
+      color: #fff;
     }
 
     /* Dual Pane Workspace */
@@ -208,14 +307,17 @@
     .log-badge { font-weight: 600; min-width: 80px; font-family: var(--font-code); font-size: 11px; text-transform: uppercase; }
     .log-badge.info { color: var(--accent-blue); }
     .log-badge.success { color: var(--accent-green); }
-    .log-badge.thinking { color: #c084fc; }
-    .log-badge.read_file { color: #38bdf8; }
+    .log-badge.thinking { color: #c084fc; font-weight: 700; }
+    .log-badge.search { color: #38bdf8; font-weight: 700; }
+    .log-badge.read_file { color: #67e8f9; }
     .log-badge.replace_content { color: #fbbf24; }
     .log-badge.pass { color: #34d399; font-weight: 700; }
     .log-badge.fail { color: #f43f5e; font-weight: 700; }
     .log-badge.warning { color: var(--accent-amber); }
     .log-badge.error { color: var(--accent-rose); }
     .log-badge.user { color: #f1f5f9; font-weight: 700; }
+    .log-badge.live { color: #a855f7; font-weight: 700; }
+    .log-badge.architect { color: #2dd4bf; font-weight: 700; }
 
     .log-msg { color: var(--text-primary); word-break: break-word; font-family: var(--font-code); }
 
@@ -254,9 +356,28 @@
       display: flex;
     }
 
-    /* Bottom Command & PTT Bar */
+    /* Screen vision badge */
+    .screen-vision-badge {
+      display: none;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: rgba(52, 211, 153, 0.15);
+      border: 1px solid rgba(52, 211, 153, 0.4);
+      color: #34d399;
+      font-size: 11px;
+      font-family: var(--font-code);
+      font-weight: 600;
+    }
+
+    .screen-vision-badge.active {
+      display: inline-flex;
+    }
+
+    /* Bottom Command & Multimodal Bar */
     .bottom-command-bar {
-      height: 60px;
+      height: 64px;
       border-top: 1px solid var(--border-subtle);
       background-color: var(--bg-overlay);
       display: flex;
@@ -267,9 +388,46 @@
       z-index: 20;
     }
 
+    /* Sound Visualizer Bars */
+    .audio-visualizer {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      height: 24px;
+      padding: 0 8px;
+    }
+
+    .wave-bar {
+      width: 3px;
+      height: 6px;
+      background-color: var(--text-tertiary);
+      border-radius: 2px;
+      transition: height 0.1s ease;
+    }
+
+    .wave-bar.speaking {
+      background-color: #c084fc;
+      animation: sound-bounce 0.4s infinite ease-in-out alternate;
+    }
+
+    .wave-bar.listening {
+      background-color: #38bdf8;
+      animation: sound-bounce 0.3s infinite ease-in-out alternate;
+    }
+
+    .wave-bar:nth-child(2) { animation-delay: 0.1s; }
+    .wave-bar:nth-child(3) { animation-delay: 0.2s; }
+    .wave-bar:nth-child(4) { animation-delay: 0.15s; }
+    .wave-bar:nth-child(5) { animation-delay: 0.25s; }
+
+    @keyframes sound-bounce {
+      0% { height: 4px; }
+      100% { height: 20px; }
+    }
+
     .ptt-trigger-btn {
       width: 220px;
-      height: 40px;
+      height: 42px;
       border-radius: var(--radius-md);
       background-color: var(--bg-elevated);
       border: 1px solid var(--border-active);
@@ -288,12 +446,26 @@
 
     .ptt-trigger-btn:hover {
       border-color: var(--accent-primary);
+      background-color: rgba(139, 92, 246, 0.1);
     }
 
     .ptt-trigger-btn.recording {
-      background-color: rgba(244, 63, 94, 0.2);
+      background-color: rgba(244, 63, 94, 0.25);
       border-color: var(--accent-rose);
       color: #fff;
+      box-shadow: 0 0 14px rgba(244, 63, 94, 0.4);
+    }
+
+    .voice-mode-select {
+      height: 42px;
+      padding: 0 8px;
+      background-color: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      color: var(--text-secondary);
+      font-size: 12px;
+      cursor: pointer;
+      outline: none;
     }
 
     .command-input-wrap {
@@ -304,7 +476,7 @@
       border: 1px solid var(--border-subtle);
       border-radius: var(--radius-md);
       padding: 0 var(--space-3);
-      height: 40px;
+      height: 42px;
       gap: var(--space-2);
     }
 
@@ -324,7 +496,7 @@
 
     .reconnect-banner {
       position: absolute;
-      top: 48px;
+      top: 52px;
       left: 0;
       right: 0;
       background-color: rgba(251, 191, 36, 0.15);
@@ -338,7 +510,7 @@
       z-index: 50;
     }
 
-    @media (max-width: 900px) {
+    @media (max-width: 960px) {
       .workspace-split {
         grid-template-columns: 1fr;
         grid-template-rows: 1fr 1fr;
@@ -346,6 +518,9 @@
       .panel {
         border-right: none;
         border-bottom: 1px solid var(--border-subtle);
+      }
+      .status-pill.waterfall-pill {
+        display: none;
       }
       .ptt-trigger-btn {
         width: 140px;
@@ -379,14 +554,23 @@
     </div>
 
     <div class="header-center">
-      <div class="status-pill">
-        <span id="wsStatusDot" class="status-dot connecting"></span>
-        <span id="wsStatusText">Connecting</span>
+      <!-- Gemini 3.8 Live Extended Thinking Pill -->
+      <div class="status-pill live-ai-pill" id="liveAiPill">
+        <span id="liveStatusDot" class="status-dot offline"></span>
+        <span id="liveStatusText">Gemini 3.8 Live (Offline)</span>
       </div>
-      <div class="status-pill" id="aiStatusPill">
+
+      <!-- Antigravity Coding Waterfall Pill -->
+      <div class="status-pill waterfall-pill" title="Antigravity Coding Waterfall: Gemini 3.8 Flash with Google Search Grounding">
         <span class="status-dot online"></span>
-        <span id="aiStatusText">AI Ready</span>
+        <span>Waterfall: 3.8 Flash + Search</span>
       </div>
+
+      <!-- Live AI Connect Toggle Button -->
+      <button type="button" class="btn-live-toggle" id="liveToggleBtn" onclick="toggleLiveAI()">
+        <span id="liveIcon"></span>
+        <span id="liveBtnLabel">Connect Live AI</span>
+      </button>
     </div>
 
     <div class="header-right">
@@ -396,7 +580,7 @@
       <button class="btn btn-secondary btn-sm" onclick="downloadZip()">
         <span id="downloadIcon"></span> ZIP
       </button>
-      <span class="text-xs text-muted font-mono" style="margin-left: 4px;">@{{ user.username }}</span>
+      <a href="/{{ user.username }}" class="text-xs text-muted font-mono" style="margin-left: 4px;" title="View public profile">@{{ user.username }}</a>
       <button class="btn btn-secondary btn-sm" onclick="openLeaveModal()">
         <span id="logoutIcon"></span> Exit
       </button>
@@ -444,12 +628,12 @@
           <div class="log-line">
             <span class="log-time">00:00:00</span>
             <span class="log-badge info">INFO</span>
-            <span class="log-msg">Workspace initialized for @{{ user.username }}. Ready to build.</span>
+            <span class="log-msg">Repository loaded for @{{ user.username }}/{{ active_slug }}. Sandbox isolated to this game folder.</span>
           </div>
           <div class="log-line">
             <span class="log-time">00:00:00</span>
             <span class="log-badge thinking">AI</span>
-            <span class="log-msg">Gemini Flash Engine online. Enter commands below to build or modify your game.</span>
+            <span class="log-msg">Antigravity Coding Engine ready with Google Search Grounding & multi-model waterfall.</span>
           </div>
         </div>
       </div>
@@ -461,12 +645,15 @@
         <div style="display: flex; align-items: center; gap: var(--space-2);">
           <span class="status-dot live"></span>
           <span class="text-xs" style="font-weight: 700; color: var(--accent-rose); letter-spacing: 0.5px;">LIVE PREVIEW</span>
+          <span class="screen-vision-badge" id="screenVisionBadge">
+            <span class="status-dot online"></span> Vision to AI Active
+          </span>
         </div>
         <div style="display: flex; gap: var(--space-2);">
           <button class="btn btn-outline btn-sm" onclick="restartPreview()" title="Restart Game">
             <span id="refreshIcon"></span> Restart
           </button>
-          <button class="btn btn-outline btn-sm" id="screenShareBtn" onclick="toggleScreenShare()" title="Stream screen to spectators">
+          <button class="btn btn-outline btn-sm" id="screenShareBtn" onclick="toggleScreenShare()" title="Stream screen to Gemini Live & spectators">
             <span id="screenIcon"></span> Screenshare
           </button>
           <button class="btn btn-outline btn-sm" onclick="openGameNewTab()" title="Open in new tab">
@@ -479,10 +666,9 @@
       </div>
 
       <div class="preview-wrapper" id="previewWrapper">
-        <!-- Sandboxed iframe (Section 27: allow-scripts strictly) -->
         <iframe id="gameIframe" class="preview-iframe" sandbox="allow-scripts" src="/{{ user.username }}/{{ active_slug }}/"></iframe>
 
-        <!-- Game Error Overlay (Section 70) -->
+        <!-- Game Error Overlay -->
         <div id="previewErrorOverlay" class="preview-error-overlay">
           <h3 style="color: var(--accent-rose);">Preview Interrupted</h3>
           <p class="text-sm text-muted">The game encountered an issue. You can ask Yulya to fix it or restart.</p>
@@ -495,22 +681,39 @@
     </div>
   </div>
 
-  <!-- Bottom Command & PTT Bar -->
+  <!-- Bottom Command & Multimodal Bar -->
   <footer class="bottom-command-bar">
+    <!-- Sound Waveform Visualizer -->
+    <div class="audio-visualizer" id="audioVisualizer" title="Microphone & AI Voice Activity">
+      <div class="wave-bar"></div>
+      <div class="wave-bar"></div>
+      <div class="wave-bar"></div>
+      <div class="wave-bar"></div>
+      <div class="wave-bar"></div>
+    </div>
+
+    <!-- Push-to-Talk Button -->
     <button type="button" class="ptt-trigger-btn" id="pttBtn">
       <span id="micIcon"></span>
       <span id="pttLabel">Hold Space to Talk</span>
     </button>
 
+    <!-- Voice Mode Select -->
+    <select class="voice-mode-select" id="voiceModeSelect" onchange="handleVoiceModeChange()">
+      <option value="ptt">Push-to-Talk</option>
+      <option value="continuous">Continuous Voice</option>
+    </select>
+
+    <!-- Command Input -->
     <div class="command-input-wrap">
-      <input type="text" id="commandInput" placeholder="Ask Yulya to modify the game (e.g. 'Add laser cannons that shoot on Spacebar')..." autocomplete="off">
+      <input type="text" id="commandInput" placeholder="Ask Yulya to modify the game (or speak directly to Gemini Live above)..." autocomplete="off">
       <button class="btn btn-primary btn-sm" id="sendBtn" onclick="sendCommand()">
         <span id="sendIcon"></span> Send
       </button>
     </div>
   </footer>
 
-  <!-- Project Selector Modal (Section 40) -->
+  <!-- Project Selector Modal -->
   <div class="modal-backdrop" id="projectModal">
     <div class="modal-content">
       <div class="modal-header">
@@ -548,7 +751,7 @@
       </div>
       <div class="modal-body">
         <label class="text-xs text-muted" style="display: block; margin-bottom: var(--space-2); font-weight: 600;">Game Title</label>
-        <input type="text" id="newProjectTitle" class="input" placeholder="e.g. Cyber Runner 2099">
+        <input type="text" id="newProjectTitle" class="input" placeholder="e.g. Spaceship Shooter">
       </div>
       <div class="modal-actions">
         <button class="btn btn-secondary btn-sm" onclick="ModalManager.close('newProjectModal')">Cancel</button>
@@ -557,7 +760,7 @@
     </div>
   </div>
 
-  <!-- Delete Project Confirmation Modal (Section 74) -->
+  <!-- Delete Project Confirmation Modal -->
   <div class="modal-backdrop" id="deleteModal">
     <div class="modal-content">
       <div class="modal-header">
@@ -565,7 +768,7 @@
         <button class="btn btn-outline btn-sm btn-icon" onclick="ModalManager.close('deleteModal')"><span id="closeDelIcon"></span></button>
       </div>
       <div class="modal-body">
-        Are you sure you want to delete <strong style="color: #fff;">{{ active_project.title or active_slug }}</strong>? This will permanently remove its code files. This cannot be undone.
+        Are you sure you want to delete <strong style="color: #fff;">{{ active_project.title or active_slug }}</strong>? This will permanently remove its code files.
       </div>
       <div class="modal-actions">
         <button class="btn btn-secondary btn-sm" onclick="ModalManager.close('deleteModal')">Cancel</button>
@@ -582,28 +785,28 @@
         <button class="btn btn-outline btn-sm btn-icon" onclick="ModalManager.close('leaveModal')"><span id="closeLeaveIcon"></span></button>
       </div>
       <div class="modal-body">
-        Return to the main hub? Your game code, active projects, and spectator links remain safely saved in your profile.
+        Return to your profile? All game files and spectator links remain safely preserved.
       </div>
       <div class="modal-actions">
         <button class="btn btn-secondary btn-sm" onclick="ModalManager.close('leaveModal')">Cancel</button>
-        <button class="btn btn-danger btn-sm" onclick="confirmLeaveVC()">Exit Workspace</button>
+        <button class="btn btn-danger btn-sm" onclick="confirmLeaveWorkspace()">Exit Workspace</button>
       </div>
     </div>
   </div>
 
-  <!-- Command Palette Modal (Section 64) -->
+  <!-- Command Palette Modal -->
   <div class="modal-backdrop" id="commandPaletteModal">
     <div class="modal-content command-palette">
       <div class="palette-input-wrap">
         <span id="paletteSearchIcon"></span>
-        <input type="text" id="paletteSearchInput" placeholder="Type a command or search action (e.g. Restart, Share, ZIP)..." autocomplete="off">
+        <input type="text" id="paletteSearchInput" placeholder="Type a command or search action (e.g. Restart, Screenshare, ZIP)..." autocomplete="off">
         <kbd style="font-family: var(--font-code); font-size: 11px; padding: 2px 6px; background-color: var(--bg-deepest); border: 1px solid var(--border-subtle); border-radius: 4px; color: var(--text-tertiary);">ESC</kbd>
       </div>
       <div class="palette-list" id="paletteList"></div>
     </div>
   </div>
 
-  <!-- Idle Warning Modal (Section 22) -->
+  <!-- Idle Warning Modal -->
   <div class="modal-backdrop" id="idleModal">
     <div class="modal-content">
       <div class="modal-header">
@@ -641,6 +844,7 @@
     document.getElementById('closeNewProjIcon').innerHTML = Icons.x('icon-sm');
     document.getElementById('closeDelIcon').innerHTML = Icons.x('icon-sm');
     document.getElementById('closeLeaveIcon').innerHTML = Icons.x('icon-sm');
+    document.getElementById('liveIcon').innerHTML = Icons.play('icon-sm');
     const palIcon = document.getElementById('paletteSearchIcon');
     if (palIcon) palIcon.innerHTML = Icons.terminal('icon-sm');
 
@@ -658,12 +862,112 @@
     let screenStream = null;
     let screenInterval = null;
 
+    // Live Voice State
+    let isLiveConnected = false;
+    let voiceMode = 'ptt'; // 'ptt' or 'continuous'
+    let liveAudioPlayer = null;
+    let micAudioContext = null;
+    let micStream = null;
+    let micProcessor = null;
+    let isSpeaking = false;
+    let isListening = false;
+
+    // --- In-Browser Web Audio Player for Gemini Live (24kHz PCM) ---
+    class LiveAudioPlayer {
+      constructor() {
+        this.audioCtx = null;
+        this.nextStartTime = 0;
+      }
+
+      init() {
+        if (!this.audioCtx) {
+          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+          this.audioCtx = new AudioContextClass({ sampleRate: 24000 });
+        }
+        if (this.audioCtx.state === 'suspended') {
+          this.audioCtx.resume();
+        }
+      }
+
+      playPCMChunk(base64Data, sampleRate = 24000) {
+        this.init();
+        try {
+          const binaryString = window.atob(base64Data);
+          const len = binaryString.length;
+          const bytes = new Uint8Array(len);
+          for (let i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          const dataView = new DataView(bytes.buffer);
+          const numSamples = Math.floor(len / 2);
+          const float32Data = new Float32Array(numSamples);
+          for (let i = 0; i < numSamples; i++) {
+            const int16 = dataView.getInt16(i * 2, true);
+            float32Data[i] = int16 / 32768.0;
+          }
+
+          const audioBuffer = this.audioCtx.createBuffer(1, numSamples, sampleRate);
+          audioBuffer.getChannelData(0).set(float32Data);
+
+          const source = this.audioCtx.createBufferSource();
+          source.buffer = audioBuffer;
+          source.connect(this.audioCtx.destination);
+
+          const curTime = this.audioCtx.currentTime;
+          if (this.nextStartTime < curTime) {
+            this.nextStartTime = curTime;
+          }
+          source.start(this.nextStartTime);
+          this.nextStartTime += audioBuffer.duration;
+
+          // Animate speaking waveform
+          animateWaveform('speaking');
+          clearTimeout(this._speakingTimeout);
+          this._speakingTimeout = setTimeout(() => {
+            if (this.audioCtx && this.audioCtx.currentTime >= this.nextStartTime) {
+              stopWaveform();
+            }
+          }, (this.nextStartTime - curTime) * 1000 + 100);
+
+        } catch (err) {
+          console.error('[AUDIO PLAYER] Error decoding chunk:', err);
+        }
+      }
+
+      stop() {
+        if (this.audioCtx) {
+          try { this.audioCtx.close(); } catch (e) {}
+          this.audioCtx = null;
+          this.nextStartTime = 0;
+        }
+        stopWaveform();
+      }
+    }
+
+    liveAudioPlayer = new LiveAudioPlayer();
+
+    // Waveform Animator
+    function animateWaveform(mode) {
+      const bars = document.querySelectorAll('.wave-bar');
+      bars.forEach(b => {
+        b.className = `wave-bar ${mode}`;
+      });
+    }
+
+    function stopWaveform() {
+      const bars = document.querySelectorAll('.wave-bar');
+      bars.forEach(b => {
+        b.className = 'wave-bar';
+      });
+    }
+
+    // Terminal Logging
     function logTerminal(message, level = 'info', customTime = null) {
       const feed = document.getElementById('terminalFeed');
       const now = new Date();
       const timeStr = customTime || now.toTimeString().split(' ')[0];
 
-      // Parse Antigravity step prefixes if embedded in message
+      // Parse Antigravity step prefixes if present
       const stepMatch = typeof message === 'string' ? message.match(/^\[([A-Z_]+)\]\s*(.*)$/) : null;
       let stepTag = level;
       let displayMsg = message;
@@ -761,9 +1065,10 @@
       const disp = document.getElementById('codeDisplay');
       disp.textContent = code;
 
-      // Update line numbers
-      const linesCount = code.split('\n').length;
-      const lines = Array.from({ length: linesCount }, (_, i) => i + 1).join('\n');
+      const linesCount = code.split('
+').length;
+      const lines = Array.from({ length: linesCount }, (_, i) => i + 1).join('
+');
       document.getElementById('lineNumbers').textContent = lines;
     }
 
@@ -774,29 +1079,25 @@
       }
     }
 
-    // WebSocket Management (Section 19, 20, 21, 22)
+    // --- WebSocket Link ---
     function connectWS() {
       const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = `${proto}//${window.location.host}/ws/studio?slug=${ACTIVE_SLUG}&role=creator`;
-      
-      updateConnStatus('connecting', 'Connecting');
 
       try {
         ws = new WebSocket(wsUrl);
 
         ws.onopen = () => {
-          updateConnStatus('online', 'Connected');
           document.getElementById('reconnectBanner').style.display = 'none';
-          logTerminal('WebSocket link established with Studio Server.', 'info');
+          logTerminal('WebSocket connection established with Studio Server.', 'info');
 
-          // Send queued commands if any
+          // Send queued commands
           while (commandQueue.length > 0) {
             const prompt = commandQueue.shift();
-            logTerminal(`[QUEUE] Sending queued prompt: "${prompt}"`, 'info');
+            logTerminal(`[QUEUE] Sending queued command: "${prompt}"`, 'info');
             executeCommand(prompt);
           }
 
-          // Heartbeat every 30s (Section 22)
           if (heartbeatInterval) clearInterval(heartbeatInterval);
           heartbeatInterval = setInterval(() => {
             if (ws && ws.readyState === WebSocket.OPEN) {
@@ -808,10 +1109,41 @@
         ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
+            
             if (data.type === 'log') {
               logTerminal(data.message, data.level || 'info');
+            } else if (data.type === 'ai_audio') {
+              // Play Gemini Live streaming voice through browser speakers
+              if (data.pcm) {
+                liveAudioPlayer.playPCMChunk(data.pcm, data.rate || 24000);
+              }
+            } else if (data.type === 'ai_text') {
+              logTerminal(`[LIVE_AI] ${data.text}`, 'live');
+            } else if (data.type === 'ai_turn_complete') {
+              setLiveStatus('Live Ready', 'online');
+            } else if (data.type === 'ai_interrupted') {
+              liveAudioPlayer.stop();
+              logTerminal('[LIVE_AI] Speech interrupted by user input', 'live');
+            } else if (data.type === 'live_status') {
+              if (data.status === 'connected') {
+                isLiveConnected = true;
+                setLiveStatus(data.model || 'Gemini 3.8 Live Ready', 'online');
+                updateLiveButton(true);
+                ToastManager.show('Gemini 3.8 Live Connected', 'success');
+              } else if (data.status === 'thinking') {
+                setLiveStatus('Extended Thinking (High)...', 'thinking');
+              } else if (data.status === 'disconnected') {
+                isLiveConnected = false;
+                setLiveStatus('Live AI Disconnected', 'offline');
+                updateLiveButton(false);
+              }
+            } else if (data.type === 'live_error') {
+              logTerminal(`[LIVE_ERROR] ${data.message}`, 'error');
+              ToastManager.show(data.message, 'error');
+              setLiveStatus('Live AI Error', 'offline');
+              updateLiveButton(false);
             } else if (data.type === 'code_update') {
-              logTerminal(`[AI] ${data.summary}`, 'success');
+              logTerminal(`[PASS] ${data.summary}`, 'pass');
               if (data.content) {
                 fileContents = data.content;
                 if (activeTab !== 'terminal') {
@@ -823,44 +1155,229 @@
                 }
               }
               restartPreview();
-              ToastManager.show('Project updated live', 'success');
-              setAiStatus('AI Ready', 'online');
+              ToastManager.show('Game updated live', 'success');
             } else if (data.type === 'idle_warning') {
               ModalManager.open('idleModal');
             } else if (data.type === 'idle_disconnect') {
               logTerminal('Disconnected due to inactivity.', 'warning');
-              updateConnStatus('offline', 'Inactive');
+              setLiveStatus('Inactive', 'offline');
             }
           } catch (err) {}
         };
 
         ws.onclose = () => {
-          updateConnStatus('offline', 'Disconnected');
           document.getElementById('reconnectBanner').style.display = 'flex';
           clearInterval(heartbeatInterval);
+          setLiveStatus('Disconnected', 'offline');
+          updateLiveButton(false);
           setTimeout(connectWS, 4000);
         };
       } catch (e) {
-        updateConnStatus('offline', 'Offline');
+        setLiveStatus('Offline', 'offline');
       }
     }
 
-    function updateConnStatus(status, label) {
-      const dot = document.getElementById('wsStatusDot');
-      const text = document.getElementById('wsStatusText');
-      dot.className = `status-dot ${status}`;
-      text.textContent = label;
-    }
-
-    function setAiStatus(text, statusClass = 'online') {
-      const pill = document.getElementById('aiStatusPill');
-      const dot = pill.querySelector('.status-dot');
-      const label = document.getElementById('aiStatusText');
-      dot.className = `status-dot ${statusClass}`;
+    function setLiveStatus(text, dotClass = 'online') {
+      const pill = document.getElementById('liveAiPill');
+      const dot = document.getElementById('liveStatusDot');
+      const label = document.getElementById('liveStatusText');
+      dot.className = `status-dot ${dotClass}`;
       label.textContent = text;
+
+      if (dotClass === 'online' || dotClass === 'speaking' || dotClass === 'listening' || dotClass === 'thinking') {
+        pill.classList.add('active');
+      } else {
+        pill.classList.remove('active');
+      }
     }
 
-    // Command Input & History (Section 47)
+    function updateLiveButton(connected) {
+      const btn = document.getElementById('liveToggleBtn');
+      const label = document.getElementById('liveBtnLabel');
+      if (connected) {
+        btn.classList.add('connected');
+        label.textContent = 'Disconnect Live AI';
+      } else {
+        btn.classList.remove('connected');
+        label.textContent = 'Connect Live AI';
+      }
+    }
+
+    // Toggle Gemini Live Voice Connection
+    function toggleLiveAI() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        ToastManager.show('Connecting to Studio server...', 'info');
+        connectWS();
+        return;
+      }
+
+      if (isLiveConnected) {
+        // Disconnect
+        ws.send(JSON.stringify({ type: 'disconnect_live' }));
+        liveAudioPlayer.stop();
+        stopMicrophone();
+        isLiveConnected = false;
+        setLiveStatus('Live AI Disconnected', 'offline');
+        updateLiveButton(false);
+        ToastManager.show('Live AI Disconnected', 'info');
+      } else {
+        // Connect
+        setLiveStatus('Connecting to Gemini 3.8 Live...', 'connecting');
+        ws.send(JSON.stringify({ type: 'connect_live' }));
+        liveAudioPlayer.init();
+      }
+    }
+
+    // --- In-Browser Web Audio Capture (16kHz PCM Int16) ---
+    async function startMicrophone() {
+      if (micStream && micAudioContext) return true;
+      try {
+        micStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            channelCount: 1,
+            sampleRate: 16000,
+            echoCancellation: true,
+            noiseSuppression: true
+          }
+        });
+
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        micAudioContext = new AudioContextClass({ sampleRate: 16000 });
+        const source = micAudioContext.createMediaStreamSource(micStream);
+        micProcessor = micAudioContext.createScriptProcessor(2048, 1, 1);
+
+        micProcessor.onaudioprocess = (e) => {
+          if (!isListening && voiceMode !== 'continuous') return;
+          const inputData = e.inputBuffer.getChannelData(0);
+
+          // Convert Float32 to Int16 PCM
+          const buffer = new ArrayBuffer(inputData.length * 2);
+          const view = new DataView(buffer);
+          for (let i = 0; i < inputData.length; i++) {
+            let s = Math.max(-1, Math.min(1, inputData[i]));
+            view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+          }
+
+          // Convert to base64
+          let binary = '';
+          const bytes = new Uint8Array(buffer);
+          for (let i = 0; i < bytes.byteLength; i++) {
+            binary += String.fromCharCode(bytes[i]);
+          }
+          const base64Data = window.btoa(binary);
+
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'audio_chunk', pcm: base64Data }));
+          }
+        };
+
+        source.connect(micProcessor);
+        micProcessor.connect(micAudioContext.destination);
+        return true;
+      } catch (err) {
+        logTerminal(`Microphone access blocked: ${err.message}`, 'warning');
+        ToastManager.show('Microphone access blocked. Please allow mic in browser.', 'error');
+        return false;
+      }
+    }
+
+    function stopMicrophone() {
+      if (micProcessor) {
+        try { micProcessor.disconnect(); } catch (e) {}
+        micProcessor = null;
+      }
+      if (micAudioContext) {
+        try { micAudioContext.close(); } catch (e) {}
+        micAudioContext = null;
+      }
+      if (micStream) {
+        micStream.getTracks().forEach(t => t.stop());
+        micStream = null;
+      }
+      stopWaveform();
+    }
+
+    function handleVoiceModeChange() {
+      const select = document.getElementById('voiceModeSelect');
+      voiceMode = select.value;
+      const pttBtn = document.getElementById('pttBtn');
+
+      if (voiceMode === 'continuous') {
+        pttBtn.style.display = 'none';
+        if (isLiveConnected) {
+          startMicrophone().then(ok => {
+            if (ok) {
+              isListening = true;
+              setLiveStatus('Continuous Voice Active', 'listening');
+              animateWaveform('listening');
+            }
+          });
+        }
+      } else {
+        pttBtn.style.display = 'flex';
+        isListening = false;
+        stopMicrophone();
+        if (isLiveConnected) setLiveStatus('Live Ready (Hold Space to Talk)', 'online');
+      }
+    }
+
+    // Push-to-Talk Handling
+    let isPTTActive = false;
+    const pttBtn = document.getElementById('pttBtn');
+
+    async function activatePTT() {
+      if (isPTTActive) return;
+      isPTTActive = true;
+      pttBtn.classList.add('recording');
+      document.getElementById('pttLabel').textContent = 'Listening... (Release)';
+
+      if (!isLiveConnected) {
+        toggleLiveAI();
+      }
+
+      const ok = await startMicrophone();
+      if (ok) {
+        isListening = true;
+        setLiveStatus('Listening to you...', 'listening');
+        animateWaveform('listening');
+      }
+    }
+
+    function deactivatePTT() {
+      if (!isPTTActive) return;
+      isPTTActive = false;
+      isListening = false;
+      pttBtn.classList.remove('recording');
+      document.getElementById('pttLabel').textContent = 'Hold Space to Talk';
+      stopWaveform();
+      if (isLiveConnected) {
+        setLiveStatus('Gemini 3.8 Live Ready', 'online');
+      }
+    }
+
+    pttBtn.addEventListener('mousedown', activatePTT);
+    pttBtn.addEventListener('mouseup', deactivatePTT);
+    pttBtn.addEventListener('mouseleave', deactivatePTT);
+
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Space' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA' && !e.repeat && voiceMode === 'ptt') {
+        e.preventDefault();
+        activatePTT();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        openCommandPalette();
+      }
+    });
+
+    window.addEventListener('keyup', (e) => {
+      if (e.code === 'Space' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA' && voiceMode === 'ptt') {
+        e.preventDefault();
+        deactivatePTT();
+      }
+    });
+
+    // Command Input & Execution
     let commandHistory = [];
     let historyIndex = -1;
 
@@ -897,7 +1414,7 @@
 
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         commandQueue.push(prompt);
-        logTerminal(`[QUEUED] "${prompt}" (will send upon reconnection)`, 'warning');
+        logTerminal(`[QUEUED] "${prompt}" (reconnecting...)`, 'warning');
         ToastManager.show('Request queued (reconnecting...)', 'info');
         return;
       }
@@ -907,8 +1424,7 @@
 
     async function executeCommand(prompt) {
       logTerminal(`YOU: ${prompt}`, 'user');
-      logTerminal('Gemini is processing your request...', 'thinking');
-      setAiStatus('Generating...', 'connecting');
+      logTerminal('Antigravity Coding Engine analyzing request with Search Grounding...', 'thinking');
 
       const sendBtn = document.getElementById('sendBtn');
       sendBtn.disabled = true;
@@ -923,14 +1439,57 @@
         if (!data.success) {
           logTerminal(`Error: ${data.error}`, 'error');
           ToastManager.show(data.error || 'Failed to modify game', 'error');
-          setAiStatus('AI Ready', 'online');
         }
       } catch (err) {
         logTerminal('Network error submitting command.', 'error');
         ToastManager.show('Request failed', 'error');
-        setAiStatus('AI Ready', 'online');
       } finally {
         sendBtn.disabled = false;
+      }
+    }
+
+    // Screensharing (1 FPS 720p vision to Gemini Live & spectators)
+    async function toggleScreenShare() {
+      const btn = document.getElementById('screenShareBtn');
+      const badge = document.getElementById('screenVisionBadge');
+
+      if (screenStream) {
+        screenStream.getTracks().forEach(t => t.stop());
+        screenStream = null;
+        clearInterval(screenInterval);
+        btn.classList.remove('btn-primary');
+        btn.classList.add('btn-outline');
+        badge.classList.remove('active');
+        logTerminal('Screenshare stopped. AI vision stream closed.', 'info');
+        return;
+      }
+
+      try {
+        screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { width: 1280, height: 720 } });
+        btn.classList.remove('btn-outline');
+        btn.classList.add('btn-primary');
+        badge.classList.add('active');
+        logTerminal('Screenshare active. Gemini Live is now inspecting your screen & canvas live.', 'success');
+
+        const video = document.createElement('video');
+        video.srcObject = screenStream;
+        video.play();
+
+        const canvas = document.createElement('canvas');
+        canvas.width = 1280;
+        canvas.height = 720;
+        const ctx = canvas.getContext('2d');
+
+        screenInterval = setInterval(() => {
+          if (!screenStream || !ws || ws.readyState !== WebSocket.OPEN) return;
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const base64 = canvas.toDataURL('image/jpeg', 0.65).split(',')[1];
+          ws.send(JSON.stringify({ type: 'video_frame', data: base64 }));
+        }, 1000); // 1 frame per second
+
+        screenStream.getVideoTracks()[0].onended = () => toggleScreenShare();
+      } catch (err) {
+        logTerminal(`Screenshare access denied: ${err.message}`, 'warning');
       }
     }
 
@@ -956,139 +1515,14 @@
 
     function askYulyaToFix() {
       document.getElementById('previewErrorOverlay').classList.remove('show');
-      executeCommand("The game crashed or encountered an error. Please inspect the code, fix any syntax or logic bugs, and ensure the game loop starts smoothly.");
-    }
-
-    // Screensharing (Section 81: 1 FPS 720p throttled)
-    async function toggleScreenShare() {
-      const btn = document.getElementById('screenShareBtn');
-      if (screenStream) {
-        screenStream.getTracks().forEach(t => t.stop());
-        screenStream = null;
-        clearInterval(screenInterval);
-        btn.classList.remove('btn-primary');
-        btn.classList.add('btn-outline');
-        logTerminal('Screenshare stopped.', 'info');
-        return;
-      }
-
-      try {
-        screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { width: 1280, height: 720 } });
-        btn.classList.remove('btn-outline');
-        btn.classList.add('btn-primary');
-        logTerminal('Screenshare active. Spectators are viewing your screen.', 'success');
-
-        const video = document.createElement('video');
-        video.srcObject = screenStream;
-        video.play();
-
-        const canvas = document.createElement('canvas');
-        canvas.width = 1280;
-        canvas.height = 720;
-        const ctx = canvas.getContext('2d');
-
-        screenInterval = setInterval(() => {
-          if (!screenStream || !ws || ws.readyState !== WebSocket.OPEN) return;
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          const base64 = canvas.toDataURL('image/jpeg', 0.65).split(',')[1];
-          ws.send(JSON.stringify({ type: 'video_frame', data: base64 }));
-        }, 1000); // 1 frame per second
-
-        screenStream.getVideoTracks()[0].onended = () => toggleScreenShare();
-      } catch (err) {
-        logTerminal(`Screenshare access denied: ${err.message}`, 'warning');
-      }
-    }
-
-    // Push-to-Talk (Spacebar)
-    let isPTT = false;
-    const pttBtn = document.getElementById('pttBtn');
-
-    function activatePTT() {
-      if (isPTT) return;
-      isPTT = true;
-      pttBtn.classList.add('recording');
-      document.getElementById('pttLabel').textContent = 'Listening... (Release)';
-      startAudioCapture();
-    }
-
-    function deactivatePTT() {
-      if (!isPTT) return;
-      isPTT = false;
-      pttBtn.classList.remove('recording');
-      document.getElementById('pttLabel').textContent = 'Hold Space to Talk';
-      stopAudioCapture();
-    }
-
-    pttBtn.addEventListener('mousedown', activatePTT);
-    pttBtn.addEventListener('mouseup', deactivatePTT);
-    pttBtn.addEventListener('mouseleave', deactivatePTT);
-
-    window.addEventListener('keydown', (e) => {
-      if (e.code === 'Space' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA' && !e.repeat) {
-        e.preventDefault();
-        activatePTT();
-      }
-      // Command palette shortcut Ctrl+K / Cmd+K (Section 64)
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        openCommandPalette();
-      }
-    });
-
-    window.addEventListener('keyup', (e) => {
-      if (e.code === 'Space' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
-        e.preventDefault();
-        deactivatePTT();
-      }
-    });
-
-    let mediaRecorder = null;
-    let audioStream = null;
-
-    async function startAudioCapture() {
-      try {
-        if (!audioStream) {
-          audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        }
-        mediaRecorder = new MediaRecorder(audioStream);
-        mediaRecorder.ondataavailable = (e) => {
-          if (e.data.size > 0 && ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(e.data);
-          }
-        };
-        mediaRecorder.start(100);
-      } catch (err) {
-        logTerminal('Microphone access blocked. Enable permissions to use Push-to-Talk.', 'warning');
-        ToastManager.show('Microphone blocked. Check browser permissions.', 'error');
-        deactivatePTT();
-      }
-    }
-
-    function stopAudioCapture() {
-      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-        mediaRecorder.stop();
-      }
+      executeCommand("The game crashed or encountered an error. Please inspect index.html, style.css, and app.js, fix any syntax or logic bugs, and ensure the game loop starts cleanly.");
     }
 
     // Modal Actions
-    function toggleProjectModal() {
-      ModalManager.open('projectModal');
-    }
-
-    function openNewProjectModal() {
-      ModalManager.close('projectModal');
-      ModalManager.open('newProjectModal');
-    }
-
-    function openDeleteModal() {
-      ModalManager.close('projectModal');
-      ModalManager.open('deleteModal');
-    }
-
-    function openLeaveModal() {
-      ModalManager.open('leaveModal');
-    }
+    function toggleProjectModal() { ModalManager.open('projectModal'); }
+    function openNewProjectModal() { ModalManager.close('projectModal'); ModalManager.open('newProjectModal'); }
+    function openDeleteModal() { ModalManager.close('projectModal'); ModalManager.open('deleteModal'); }
+    function openLeaveModal() { ModalManager.open('leaveModal'); }
 
     function stayConnected() {
       ModalManager.close('idleModal');
@@ -1132,7 +1566,7 @@
         });
         const data = await res.json();
         if (data.success) {
-          window.location.href = '/studio';
+          window.location.href = `/${USERNAME}`;
         } else {
           ToastManager.show(data.error || 'Failed to delete game', 'error');
         }
@@ -1141,27 +1575,35 @@
       }
     }
 
-    async function confirmLeaveVC() {
-      try {
-        await fetch('/api/leave-vc', { method: 'POST' });
-        ToastManager.show('Workspace saved', 'info');
-        setTimeout(() => { window.location.href = '/'; }, 300);
-      } catch (e) {
-        window.location.href = '/';
-      }
+    async function confirmLeaveWorkspace() {
+      cleanDisconnectAll();
+      window.location.href = `/${USERNAME}`;
     }
 
-    // Command Palette (Section 64)
+    function shareProjectLink() {
+      const url = SPECTATOR_TOKEN
+        ? `${window.location.origin}/spectate/${SPECTATOR_TOKEN}`
+        : `${window.location.origin}/spectate/${USERNAME}/${ACTIVE_SLUG}`;
+      copyToClipboard(url, 'Spectator stream link copied to clipboard');
+    }
+
+    function downloadZip() {
+      window.location.href = `/api/download-zip/${USERNAME}/${ACTIVE_SLUG}`;
+    }
+
+    // Command Palette Actions
     const PALETTE_ACTIONS = [
-      { id: 'new_proj', title: 'Create Project', shortcut: 'Ctrl+N', action: () => openNewProjectModal() },
-      { id: 'switch_proj', title: 'Switch Project', shortcut: 'P', action: () => toggleProjectModal() },
+      { id: 'toggle_live', title: 'Connect / Disconnect Gemini 3.8 Live', shortcut: 'Ctrl+L', action: () => toggleLiveAI() },
+      { id: 'screenshare', title: 'Toggle Screenshare (Vision to AI)', shortcut: 'Ctrl+S', action: () => toggleScreenShare() },
       { id: 'restart_game', title: 'Restart Game Preview', shortcut: 'R', action: () => restartPreview() },
-      { id: 'share_game', title: 'Share Game Link', shortcut: 'S', action: () => shareProjectLink() },
+      { id: 'new_proj', title: 'Create New Game Repository', shortcut: 'Ctrl+N', action: () => openNewProjectModal() },
+      { id: 'switch_proj', title: 'Switch Game Project', shortcut: 'P', action: () => toggleProjectModal() },
+      { id: 'share_game', title: 'Share Game Stream Link', shortcut: 'S', action: () => shareProjectLink() },
       { id: 'download_zip', title: 'Download Project ZIP', shortcut: 'D', action: () => downloadZip() },
       { id: 'reconnect_ws', title: 'Reconnect WebSocket', shortcut: 'C', action: () => connectWS() },
       { id: 'toggle_terminal', title: 'Toggle Terminal / Code View', shortcut: 'T', action: () => switchTab(activeTab === 'terminal' ? 'app.js' : 'terminal') },
       { id: 'open_preview', title: 'Open Preview in New Tab', shortcut: 'O', action: () => openGameNewTab() },
-      { id: 'leave_session', title: 'Exit Studio Workspace', shortcut: 'L', action: () => openLeaveModal() }
+      { id: 'leave_session', title: 'Exit Studio to Profile', shortcut: 'L', action: () => openLeaveModal() }
     ];
 
     let paletteSelectedIndex = 0;
@@ -1197,16 +1639,16 @@
       filtered.forEach((item, idx) => {
         const el = document.createElement('div');
         el.className = `palette-item ${idx === paletteSelectedIndex ? 'active' : ''}`;
-        
+
         const titleSpan = document.createElement('span');
         titleSpan.textContent = item.title;
-        
+
         const kbd = document.createElement('kbd');
         kbd.textContent = item.shortcut;
-        
+
         el.appendChild(titleSpan);
         el.appendChild(kbd);
-        
+
         el.onclick = () => {
           ModalManager.close('commandPaletteModal');
           item.action();
@@ -1243,16 +1685,25 @@
       });
     }
 
-    function shareProjectLink() {
-      const url = SPECTATOR_TOKEN
-        ? `${window.location.origin}/spectate/${SPECTATOR_TOKEN}`
-        : `${window.location.origin}/spectate/${USERNAME}/${ACTIVE_SLUG}`;
-      copyToClipboard(url, 'Spectator stream link copied to clipboard');
+    // --- Clean Auto-Disconnect on Unload / Tab Close ---
+    function cleanDisconnectAll() {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.send(JSON.stringify({ type: 'disconnect_live' }));
+          ws.close();
+        } catch (e) {}
+      }
+      if (liveAudioPlayer) liveAudioPlayer.stop();
+      stopMicrophone();
+      if (screenStream) {
+        screenStream.getTracks().forEach(t => t.stop());
+        screenStream = null;
+      }
+      if (screenInterval) clearInterval(screenInterval);
     }
 
-    function downloadZip() {
-      window.location.href = `/api/download-zip/${USERNAME}/${ACTIVE_SLUG}`;
-    }
+    window.addEventListener('beforeunload', cleanDisconnectAll);
+    window.addEventListener('pagehide', cleanDisconnectAll);
 
     // Startup
     loadProjectFiles();

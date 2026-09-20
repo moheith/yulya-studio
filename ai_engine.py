@@ -91,6 +91,15 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
             except Exception:
                 pass
         
+        # Search Grounding step
+        search_msg = f"[SEARCH] Querying Google Search grounding for HTML5 canvas game mechanics"
+        projects_manager.write_build_log(user_id_int, safe_slug, "SEARCH", search_msg)
+        if log_callback:
+            try:
+                await log_callback("search", search_msg)
+            except Exception:
+                pass
+
         # Read existing files strictly within this game repo
         read_msg = f"[READ_FILE] Reading project repository files for '{safe_slug}'"
         projects_manager.write_build_log(user_id_int, safe_slug, "READ_FILE", read_msg)
@@ -136,30 +145,42 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
                 "gemini-3.5-flash-lite",
                 "gemini-3.1-flash-lite"
             ]:
-                try:
-                    response = client.models.generate_content(
-                        model=model_name,
-                        contents=json.dumps(context_payload),
-                        config=types.GenerateContentConfig(
-                            system_instruction=SYSTEM_PROMPT,
-                            response_mime_type="application/json",
-                            temperature=0.4
+                # Try with Search Grounding tool first, then fallback to standard prompt
+                for use_search in [True, False]:
+                    try:
+                        cfg_kwargs = {
+                            "system_instruction": SYSTEM_PROMPT,
+                            "response_mime_type": "application/json",
+                            "temperature": 0.4
+                        }
+                        if use_search:
+                            cfg_kwargs["tools"] = [types.Tool(google_search=types.GoogleSearch())]
+                        
+                        response = client.models.generate_content(
+                            model=model_name,
+                            contents=json.dumps(context_payload),
+                            config=types.GenerateContentConfig(**cfg_kwargs)
                         )
-                    )
-                    if response and response.text:
-                        return response.text
-                except APIError as ae:
-                    last_err = ae
-                    err_str = str(ae)
-                    # If 429 quota exhausted or 404 on this model, fall down to the next model in the waterfall
-                    if "RESOURCE_EXHAUSTED" in err_str or ae.code in (429, 404):
-                        continue
-                    # If invalid API key (400, 403), stop immediately
-                    if "API_KEY_INVALID" in err_str or ae.code in (400, 403):
-                        raise ae
-                except Exception as e:
-                    last_err = e
-                    continue
+                        if response and response.text:
+                            return response.text
+                    except APIError as ae:
+                        last_err = ae
+                        err_str = str(ae)
+                        # If search grounding is rejected with response_mime_type on this model, retry without search
+                        if use_search and ("grounding" in err_str.lower() or "tool" in err_str.lower() or ae.code == 400):
+                            continue
+                        # If 429 quota exhausted or 404 on this model, move to next model in waterfall
+                        if "RESOURCE_EXHAUSTED" in err_str or ae.code in (429, 404):
+                            break
+                        # If invalid API key (400, 403), stop immediately
+                        if "API_KEY_INVALID" in err_str or ae.code in (400, 403):
+                            raise ae
+                        break
+                    except Exception as e:
+                        last_err = e
+                        if use_search:
+                            continue
+                        break
             if last_err:
                 raise last_err
             raise RuntimeError("All models in the generation waterfall failed.")

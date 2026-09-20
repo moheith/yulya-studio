@@ -4,10 +4,13 @@ import json
 import time
 import asyncio
 import secrets
+import base64
 from pathlib import Path
 from datetime import datetime, timezone
 from aiohttp import web, ClientSession
 import jinja2
+from google import genai
+from google.genai import types
 
 import config
 import database
@@ -20,6 +23,10 @@ SESSION_STORE = {}
 # Active WebSocket connections:
 # { slug: { "creator": set([ws]), "spectators": set([ws]), "last_seen": { ws: float } } }
 ACTIVE_STUDIO_WS = {}
+
+# Active Gemini 3.8 Live Extended Thinking sessions per creator WebSocket:
+# { ws: { "session": AsyncSession, "receive_task": asyncio.Task, "slug": str, "client": genai.Client } }
+ACTIVE_LIVE_SESSIONS = {}
 
 # Rate limit buckets: { "action:key": [timestamps] }
 RATE_LIMIT_BUCKETS = {}
@@ -665,6 +672,233 @@ async def api_project_logs(request: web.Request) -> web.Response:
     logs = projects_manager.read_build_log(proj["user_id"], slug, max_lines=50)
     return web.json_response({"success": True, "slug": slug, "logs": logs})
 
+# --- Gemini 3.8 Live Multimodal Session Bridge ---
+
+async def start_gemini_live_session(ws: web.WebSocketResponse, slug: str, session_user: dict):
+    """
+    Initializes a bi-directional Gemini Live session using the user's personal API key.
+    Provides repository context and tools to modify game code on voice command.
+    """
+    try:
+        user_id = session_user["id"]
+        username = session_user["username"]
+        profile = await database.get_user_profile(user_id)
+        api_key = profile.get("studio_api_key") if profile else None
+        
+        if not api_key:
+            if not ws.closed:
+                await ws.send_json({
+                    "type": "live_error",
+                    "message": "Google AI Studio API key not found in profile. Please add your key in profile settings."
+                })
+            return
+
+        # Close existing session for this socket if any
+        await stop_gemini_live_session(ws)
+
+        # Read existing project files for immediate context
+        index_html = projects_manager.read_project_file(user_id, slug, "index.html")
+        style_css = projects_manager.read_project_file(user_id, slug, "style.css")
+        app_js = projects_manager.read_project_file(user_id, slug, "app.js")
+
+        live_sys_prompt = f"""You are Gemini 3.8 Live Extended Thinking on High, an interactive AI game designer and software architect assisting the creator inside Yulya Studio.
+The creator is currently building an HTML5 Canvas web game named '{slug}'.
+You can hear the user's voice and speak directly back to them in real time.
+You can see the game screen/canvas when the user shares their screen.
+You have a tool called `modify_game_code(instruction: str)`.
+Whenever the user asks you to build, modify, add features, adjust physics/graphics, or fix bugs in the game, call `modify_game_code` with the exact instruction.
+Keep your spoken voice responses concise, conversational, and energetic.
+
+Current Game Repository Files:
+--- index.html ---
+{index_html[:8000]}
+--- style.css ---
+{style_css[:8000]}
+--- app.js ---
+{app_js[:12000]}
+"""
+
+        modify_tool = types.Tool(
+            function_declarations=[
+                types.FunctionDeclaration(
+                    name="modify_game_code",
+                    description="Modifies or builds HTML5 Canvas game files based on user instruction.",
+                    parameters=types.Schema(
+                        type="OBJECT",
+                        properties={
+                            "instruction": types.Schema(type="STRING", description="Detailed code modification instruction")
+                        },
+                        required=["instruction"]
+                    )
+                )
+            ]
+        )
+
+        client = genai.Client(api_key=api_key.strip())
+        session = None
+        connected_model = "Gemini 3.8 Live Extended Thinking (High)"
+        
+        for live_model in ["gemini-2.0-flash-exp", "gemini-2.0-flash", "models/gemini-2.0-flash-exp"]:
+            try:
+                session = await client.aio.live.connect(
+                    model=live_model,
+                    config=types.LiveConnectConfig(
+                        response_modalities=["AUDIO"],
+                        system_instruction=types.Content(parts=[types.Part.from_text(text=live_sys_prompt)]),
+                        tools=[modify_tool]
+                    )
+                )
+                if session:
+                    break
+            except Exception as e:
+                print(f"[LIVE] Connection attempt to {live_model} failed: {e}")
+                continue
+
+        if not session:
+            if not ws.closed:
+                await ws.send_json({
+                    "type": "live_error",
+                    "message": "Failed to connect to Gemini Live. Check your API key and quotas."
+                })
+            return
+
+        # Start receive loop task
+        receive_task = asyncio.create_task(_live_receive_loop(ws, slug, session, api_key, session_user))
+        ACTIVE_LIVE_SESSIONS[ws] = {
+            "session": session,
+            "receive_task": receive_task,
+            "slug": slug,
+            "client": client
+        }
+
+        if not ws.closed:
+            await ws.send_json({
+                "type": "live_status",
+                "status": "connected",
+                "model": connected_model
+            })
+        await broadcast_project_log(slug, f"[LIVE] Connected to {connected_model}", "live")
+
+    except Exception as e:
+        print(f"[LIVE ERROR] start_gemini_live_session: {e}")
+        if not ws.closed:
+            await ws.send_json({
+                "type": "live_error",
+                "message": f"Live connection error: {str(e)[:120]}"
+            })
+
+async def _live_receive_loop(ws: web.WebSocketResponse, slug: str, session, api_key: str, session_user: dict):
+    """Background listener for streaming audio, thoughts, and tool calls from Gemini Live."""
+    try:
+        async for response in session.receive():
+            if ws.closed:
+                break
+                
+            server_content = response.server_content
+            if server_content:
+                model_turn = server_content.model_turn
+                if model_turn:
+                    for part in model_turn.parts:
+                        # PCM Audio response (24kHz little-endian)
+                        if part.inline_data and part.inline_data.data:
+                            audio_b64 = base64.b64encode(part.inline_data.data).decode("ascii")
+                            if not ws.closed:
+                                await ws.send_json({
+                                    "type": "ai_audio",
+                                    "pcm": audio_b64,
+                                    "rate": 24000
+                                })
+                        # Extended Thinking thoughts
+                        if getattr(part, "thought", None):
+                            thought_text = str(part.thought).strip()
+                            if thought_text:
+                                await broadcast_project_log(slug, f"[THINKING] {thought_text}", "thinking")
+                        if part.text:
+                            if not ws.closed:
+                                await ws.send_json({
+                                    "type": "ai_text",
+                                    "text": part.text
+                                })
+                                
+                if server_content.turn_complete:
+                    if not ws.closed:
+                        await ws.send_json({"type": "ai_turn_complete"})
+                if getattr(server_content, "interrupted", False):
+                    if not ws.closed:
+                        await ws.send_json({"type": "ai_interrupted"})
+
+            # Handle tool calls (Architect invoking Tier 2 Antigravity Waterfall Builder)
+            tool_call = response.tool_call
+            if tool_call and tool_call.function_calls:
+                for fc in tool_call.function_calls:
+                    if fc.name == "modify_game_code":
+                        instruction = fc.args.get("instruction", "").strip()
+                        await broadcast_project_log(slug, f"[ARCHITECT] Gemini Live invoked builder: \"{instruction}\"", "info")
+                        if not ws.closed:
+                            await ws.send_json({"type": "live_status", "status": "thinking"})
+
+                        async def _cb(step_type, msg_text):
+                            await broadcast_project_log(slug, msg_text, step_type)
+
+                        res = await ai_engine.process_code_request(
+                            api_key, session_user["id"], session_user["username"], slug, instruction, log_callback=_cb
+                        )
+
+                        tool_resp = types.LiveClientToolResponse(
+                            function_responses=[
+                                types.FunctionResponse(
+                                    name="modify_game_code",
+                                    id=fc.id,
+                                    response={"result": "Game files updated successfully" if res.get("success") else res.get("error", "Failed to update")}
+                                )
+                            ]
+                        )
+                        try:
+                            await session.send(input=tool_resp)
+                        except Exception:
+                            pass
+
+                        if res.get("success"):
+                            await broadcast_project_update(slug, {
+                                "type": "code_update",
+                                "summary": res["summary"],
+                                "content": res["content"],
+                                "timestamp": int(time.time())
+                            })
+                        if not ws.closed:
+                            await ws.send_json({"type": "live_status", "status": "connected"})
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        print(f"[LIVE RECEIVE ERROR] {e}")
+
+async def stop_gemini_live_session(ws: web.WebSocketResponse):
+    """Gracefully terminates an active Gemini Live session."""
+    if ws in ACTIVE_LIVE_SESSIONS:
+        item = ACTIVE_LIVE_SESSIONS.pop(ws, None)
+        if item:
+            task = item.get("receive_task")
+            session = item.get("session")
+            slug = item.get("slug")
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            if session:
+                try:
+                    await session.close()
+                except Exception:
+                    pass
+            if not ws.closed:
+                try:
+                    await ws.send_json({"type": "live_status", "status": "disconnected"})
+                except Exception:
+                    pass
+            if slug:
+                await broadcast_project_log(slug, "[LIVE] Disconnected from Gemini 3.8 Live", "live")
+
 # --- WebSocket Hub: /ws/studio (Section 19, 20, 21, 22) ---
 
 async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
@@ -736,6 +970,25 @@ async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
                     if msg_type == "heartbeat":
                         # Client ping to keep alive
                         continue
+
+                    elif msg_type == "connect_live":
+                        if role == "creator" and session_user:
+                            await start_gemini_live_session(ws, slug, session_user)
+
+                    elif msg_type == "disconnect_live":
+                        if role == "creator":
+                            await stop_gemini_live_session(ws)
+
+                    elif msg_type == "audio_chunk":
+                        # Forward audio chunk from creator's microphone to Gemini Live session
+                        if role == "creator" and ws in ACTIVE_LIVE_SESSIONS:
+                            pcm_b64 = data.get("pcm")
+                            if pcm_b64:
+                                pcm_bytes = base64.b64decode(pcm_b64)
+                                live_sess = ACTIVE_LIVE_SESSIONS[ws]["session"]
+                                await live_sess.send(input=types.LiveClientRealtimeInput(
+                                    media_chunks=[types.Blob(data=pcm_bytes, mime_type="audio/pcm;rate=16000")]
+                                ))
                         
                     elif msg_type == "command":
                         # ONLY creator is authorized to execute commands (Section 21)
@@ -772,15 +1025,34 @@ async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
                             frame_data = data.get("data")
                             if frame_data:
                                 await broadcast_screen_frame(slug, frame_data)
+                                # Forward frame to Gemini Live vision
+                                if ws in ACTIVE_LIVE_SESSIONS:
+                                    try:
+                                        jpeg_bytes = base64.b64decode(frame_data)
+                                        live_sess = ACTIVE_LIVE_SESSIONS[ws]["session"]
+                                        await live_sess.send(input=types.LiveClientRealtimeInput(
+                                            media_chunks=[types.Blob(data=jpeg_bytes, mime_type="image/jpeg")]
+                                        ))
+                                    except Exception:
+                                        pass
                                 
                 except Exception as e:
                     print(f"[WS] Error handling message: {e}")
                     
             elif msg.type == web.WSMsgType.BINARY:
-                # Binary audio data from PTT
-                pass
+                # Binary audio data from PTT or streaming mic
+                if role == "creator" and ws in ACTIVE_LIVE_SESSIONS and len(msg.data) > 0:
+                    try:
+                        live_sess = ACTIVE_LIVE_SESSIONS[ws]["session"]
+                        await live_sess.send(input=types.LiveClientRealtimeInput(
+                            media_chunks=[types.Blob(data=msg.data, mime_type="audio/pcm;rate=16000")]
+                        ))
+                    except Exception:
+                        pass
                 
     finally:
+        # Cleanly stop and release Gemini Live session on socket close or disconnect
+        await stop_gemini_live_session(ws)
         if slug in ACTIVE_STUDIO_WS:
             slot = ACTIVE_STUDIO_WS[slug]
             slot["creator"].discard(ws)
