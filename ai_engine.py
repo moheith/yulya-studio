@@ -3,92 +3,191 @@ import json
 import asyncio
 from google import genai
 from google.genai import types
+from google.genai.errors import APIError
 import projects_manager
 import database
 
-SYSTEM_PROMPT = """You are Yulya Studio AI — an elite web and game developer.
-You build and modify HTML5 Canvas, Web Audio API, WebGL, Phaser, Three.js, and modern CSS games for users.
+# Per-project lock dictionary: (user_id, slug) -> asyncio.Lock() (Section 83)
+PROJECT_LOCKS = {}
 
-When asked to create or modify a project:
-1. Ensure the code is production-ready, beautiful, responsive, and completely functional.
-2. Include engaging gameplay, smooth controls, visual effects, and retro/modern synth styling.
-3. Return your output strictly as a valid JSON object containing the updated files:
+def get_project_lock(user_id: int, slug: str) -> asyncio.Lock:
+    key = (int(user_id), slug.lower())
+    if key not in PROJECT_LOCKS:
+        PROJECT_LOCKS[key] = asyncio.Lock()
+    return PROJECT_LOCKS[key]
+
+SYSTEM_PROMPT = """You are Yulya Studio Code Engine.
+You generate and modify HTML5 Canvas web games.
+
+Rules:
+1. Output valid JSON.
+2. Return:
 {
-  "summary": "Brief 1-sentence description of the changes made",
-  "files": {
-    "index.html": "<full html content>",
-    "style.css": "<full css content>",
-    "app.js": "<full javascript content>"
-  }
+    "summary": "Brief 1-sentence summary of the update",
+    "files": {
+        "index.html": "<complete html file>",
+        "style.css": "<complete css file>",
+        "app.js": "<complete javascript file>"
+    }
 }
-Do NOT include markdown backticks around the JSON. Only output valid parseable JSON.
+3. Return complete files. Never return partial diffs or placeholders.
+4. Games must be responsive and centered in the window.
+5. Games must be playable with keyboard and mouse/touch.
+6. Prefer HTML5 Canvas and vanilla JavaScript.
+7. Avoid unnecessary external libraries; everything should run self-contained.
+8. Include clean error handling, scoring, restart mechanism, and clear game loop.
+9. If a request is unclear, make an engaging and polished creative interpretation.
+10. When modifying or fixing an issue, inspect the existing code carefully and preserve working mechanics while applying the requested changes.
+11. Do NOT wrap output in markdown codeblocks. Output strictly valid parseable JSON.
 """
+
+def truncate_context(content: str, max_chars: int = 20000) -> str:
+    """Limits code context sent to Gemini to avoid runaway token explosion (Section 84)."""
+    if len(content) <= max_chars:
+        return content
+    # Keep beginning and end of file if overly large
+    half = max_chars // 2
+    return content[:half] + "\n/* ... [context truncated for length] ... */\n" + content[-half:]
 
 async def process_code_request(api_key: str, user_id: int, username: str, slug: str, prompt: str) -> dict:
     """
     Executes an AI code creation or modification request using the user's personal Gemini API key.
+    Uses per-project locks and robust error handling.
     """
-    cleaned_key = api_key.strip()
-    
-    # Read existing files if any
-    current_html = projects_manager.read_project_file(user_id, slug, "index.html")
-    current_css = projects_manager.read_project_file(user_id, slug, "style.css")
-    current_js = projects_manager.read_project_file(user_id, slug, "app.js")
-    
-    context_payload = {
-        "user_request": prompt,
-        "existing_code": {
-            "index.html": current_html,
-            "style.css": current_css,
-            "app.js": current_js
+    lock = get_project_lock(user_id, slug)
+    if lock.locked():
+        # Someone is already generating for this project
+        pass
+
+    async with lock:
+        cleaned_key = api_key.strip()
+        
+        # Read existing files (truncated to 20 KB to prevent token explosion)
+        current_html = truncate_context(projects_manager.read_project_file(user_id, slug, "index.html"))
+        current_css = truncate_context(projects_manager.read_project_file(user_id, slug, "style.css"))
+        current_js = truncate_context(projects_manager.read_project_file(user_id, slug, "app.js"))
+        
+        context_payload = {
+            "user_request": prompt,
+            "project_name": slug,
+            "creator": username,
+            "existing_code": {
+                "index.html": current_html,
+                "style.css": current_css,
+                "app.js": current_js
+            }
         }
-    }
-    
-    def _call_gemini():
-        client = genai.Client(api_key=cleaned_key)
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=json.dumps(context_payload),
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
-                response_mime_type="application/json",
-                temperature=0.4
+        
+        def _call_gemini():
+            client = genai.Client(api_key=cleaned_key)
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=json.dumps(context_payload),
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT,
+                    response_mime_type="application/json",
+                    temperature=0.4
+                )
             )
-        )
-        return response.text
-        
-    raw_response = await asyncio.to_thread(_call_gemini)
-    
-    try:
-        data = json.loads(raw_response)
-        summary = data.get("summary", "Updated project files.")
-        files = data.get("files", {})
-        
-        saved_files = []
-        for fname, content in files.items():
-            if fname in ["index.html", "style.css", "app.js"] and content:
-                projects_manager.write_project_file(user_id, slug, fname, content)
-                saved_files.append(fname)
+            return response.text
+            
+        try:
+            # 50 second timeout on AI code generation (Section 85)
+            raw_response = await asyncio.wait_for(asyncio.to_thread(_call_gemini), timeout=50.0)
+        except asyncio.TimeoutError:
+            return {
+                "success": False,
+                "error": "Yulya couldn't finish the request. The Gemini request timed out. Please try again."
+            }
+        except APIError as ae:
+            err_msg = str(ae)
+            if "RESOURCE_EXHAUSTED" in err_msg or ae.code == 429:
+                return {
+                    "success": False,
+                    "error": "Gemini quota reached. Your API key has reached its current usage limit. Check your Google AI Studio quota or try again later."
+                }
+            elif "API_KEY_INVALID" in err_msg or ae.code in [400, 403]:
+                return {
+                    "success": False,
+                    "error": "Your Gemini API key could not be verified by Google AI. Please update your key in setup."
+                }
+            return {
+                "success": False,
+                "error": f"Gemini API returned an error: {err_msg[:120]}"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Failed to connect to Gemini: {str(e)[:120]}"
+            }
+            
+        try:
+            # Clean markdown code blocks if the model wrapped output anyway
+            clean_text = raw_response.strip()
+            if clean_text.startswith("```"):
+                lines = clean_text.splitlines()
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].strip() == "```":
+                    lines = lines[:-1]
+                clean_text = "\n".join(lines).strip()
                 
-        # Update database record
-        await database.save_project(
-            user_id=user_id,
-            username=username,
-            slug=slug,
-            title=slug.replace("-", " ").title(),
-            description=summary,
-            files=saved_files
-        )
-        
-        return {
-            "success": True,
-            "summary": summary,
-            "files": saved_files,
-            "content": {f: projects_manager.read_project_file(user_id, slug, f) for f in saved_files}
-        }
-    except Exception as e:
-        print(f"[AI_ENGINE] Error parsing AI response: {e}\nRaw output: {raw_response[:300]}")
-        return {
-            "success": False,
-            "error": f"Failed to parse generated code: {str(e)}"
-        }
+            data = json.loads(clean_text)
+            summary = data.get("summary", "Updated project files.")
+            files = data.get("files", {})
+            
+            if not isinstance(files, dict) or not files:
+                return {
+                    "success": False,
+                    "error": "AI response did not contain updated files."
+                }
+                
+            saved_files = []
+            for fname in ["index.html", "style.css", "app.js"]:
+                content = files.get(fname)
+                if content and isinstance(content, str):
+                    projects_manager.write_project_file(user_id, slug, fname, content)
+                    saved_files.append(fname)
+                    
+            if not saved_files:
+                return {
+                    "success": False,
+                    "error": "No valid game files (HTML, CSS, JS) were generated."
+                }
+                
+            # Update database record
+            await database.save_project(
+                user_id=user_id,
+                username=username,
+                slug=slug,
+                title=slug.replace("-", " ").title(),
+                description=summary,
+                files=saved_files
+            )
+            
+            # Read back saved files
+            updated_content = {f: projects_manager.read_project_file(user_id, slug, f) for f in saved_files}
+            
+            return {
+                "success": True,
+                "summary": summary,
+                "files": saved_files,
+                "content": updated_content
+            }
+        except json.JSONDecodeError as jde:
+            print(f"[AI_ENGINE] JSON decode error: {jde}\nOutput snippet: {raw_response[:300]}")
+            return {
+                "success": False,
+                "error": "Yulya generated invalid formatted code. Please try rephrasing your request."
+            }
+        except ValueError as ve:
+            return {
+                "success": False,
+                "error": f"File validation error: {str(ve)}"
+            }
+        except Exception as e:
+            print(f"[AI_ENGINE] Unexpected error: {e}")
+            return {
+                "success": False,
+                "error": f"Unexpected error processing update: {str(e)}"
+            }

@@ -3,423 +3,917 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Yulya Studio | Creator Workspace</title>
+  <title>Yulya Studio — Workspace</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com">
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/studio.css">
   <style>
-    :root {
-      --bg: #070314;
-      --panel: #0d0620;
-      --panel-border: rgba(155, 89, 182, 0.3);
-      --primary: #9b59b6;
-      --cyan: #00f0ff;
-      --pink: #ff007f;
-      --green: #39ff14;
-      --text: #ffffff;
-      --muted: #8888aa;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: 'Space Grotesk', sans-serif;
       height: 100vh;
       display: flex;
       flex-direction: column;
       overflow: hidden;
+      background-color: var(--bg-deepest);
     }
-    /* Topbar */
-    header {
-      height: 60px;
-      background: rgba(13, 6, 32, 0.95);
-      border-bottom: 1px solid var(--panel-border);
+
+    /* Header */
+    .studio-header {
+      height: 48px;
+      border-bottom: 1px solid var(--border-subtle);
+      background-color: var(--bg-overlay);
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0 24px;
-      z-index: 10;
+      padding: 0 var(--space-4);
+      flex-shrink: 0;
+      z-index: 20;
     }
-    .header-left {
-      display: flex;
-      align-items: center;
-      gap: 20px;
-    }
-    .logo {
-      font-size: 1.2rem;
-      font-weight: 700;
-      letter-spacing: 1px;
-    }
-    .logo span {
-      background: linear-gradient(135deg, var(--cyan), var(--pink));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-    .project-selector {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    select {
-      background: #050110;
-      border: 1px solid var(--panel-border);
-      color: var(--cyan);
-      padding: 6px 12px;
-      border-radius: 8px;
-      font-family: 'Space Grotesk', sans-serif;
-      font-weight: 600;
-      outline: none;
-      cursor: pointer;
-    }
-    .btn {
-      padding: 6px 14px;
-      border-radius: 8px;
-      font-size: 0.85rem;
-      font-weight: 600;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      transition: all 0.2s;
-      border: none;
-      text-decoration: none;
-    }
-    .btn-sm { padding: 4px 10px; font-size: 0.8rem; }
-    .btn-primary { background: linear-gradient(135deg, var(--pink), var(--primary)); color: white; }
-    .btn-outline { background: transparent; border: 1px solid var(--cyan); color: var(--cyan); }
-    .btn-outline:hover { background: rgba(0, 240, 255, 0.1); }
-    .btn-danger { background: rgba(255, 51, 68, 0.2); border: 1px solid #ff3344; color: #ff8899; }
-    .btn-danger:hover { background: rgba(255, 51, 68, 0.4); }
 
-    /* Workspace Dual Pane */
-    .workspace {
+    .header-left, .header-center, .header-right {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+    }
+
+    .logo-mark {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .project-menu-btn {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+      height: 28px;
+      padding: 0 var(--space-3);
+      background-color: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      color: var(--text-primary);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+
+    .project-menu-btn:hover {
+      border-color: var(--border-active);
+    }
+
+    /* Dual Pane Workspace */
+    .workspace-split {
       flex: 1;
       display: grid;
       grid-template-columns: 1fr 1fr;
       overflow: hidden;
+      background-color: var(--bg-base);
     }
-    .pane {
+
+    .panel {
       display: flex;
       flex-direction: column;
-      border-right: 1px solid var(--panel-border);
       overflow: hidden;
-      background: var(--panel);
+      border-right: 1px solid var(--border-subtle);
+      background-color: var(--bg-base);
     }
-    .pane:last-child {
+
+    .panel:last-child {
       border-right: none;
     }
-    .pane-header {
-      height: 44px;
-      background: rgba(7, 3, 20, 0.8);
-      border-bottom: 1px solid var(--panel-border);
+
+    .panel-header {
+      height: 40px;
+      border-bottom: 1px solid var(--border-subtle);
+      background-color: var(--bg-deepest);
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0 16px;
+      padding: 0 var(--space-3);
+      flex-shrink: 0;
     }
-    .tabs {
+
+    .tabs-group {
       display: flex;
-      gap: 4px;
+      align-items: center;
+      gap: 2px;
+      height: 100%;
     }
-    .tab {
-      padding: 6px 12px;
-      border-radius: 6px;
-      font-size: 0.8rem;
-      font-family: 'JetBrains Mono', monospace;
-      color: var(--muted);
-      cursor: pointer;
+
+    .tab-btn {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+      height: 100%;
+      padding: 0 var(--space-3);
       background: transparent;
       border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-family: var(--font-code);
+      cursor: pointer;
+      transition: var(--transition-fast);
     }
-    .tab.active {
-      background: rgba(0, 240, 255, 0.15);
-      color: var(--cyan);
-      font-weight: 600;
-    }
-    .code-view {
-      flex: 1;
-      overflow: auto;
-      padding: 16px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.85rem;
-      line-height: 1.5;
-      color: #eee;
-      white-space: pre-wrap;
-      word-break: break-all;
-      background: #050110;
-    }
-    .terminal-line {
-      margin-bottom: 4px;
-    }
-    .term-info { color: var(--cyan); }
-    .term-success { color: var(--green); }
-    .term-thought { color: #d175ff; font-style: italic; }
-    .term-warn { color: #ffcc00; }
-    .term-err { color: #ff3344; }
 
-    /* Preview Iframe */
-    .preview-container {
+    .tab-btn:hover {
+      color: var(--text-primary);
+      background-color: rgba(255, 255, 255, 0.02);
+    }
+
+    .tab-btn.active {
+      color: var(--text-primary);
+      border-bottom-color: var(--accent-primary);
+      background-color: rgba(139, 92, 246, 0.06);
+    }
+
+    /* Code View Area */
+    .editor-wrapper {
       flex: 1;
-      background: #000;
+      display: flex;
+      overflow: hidden;
+      background-color: var(--bg-deepest);
       position: relative;
+    }
+
+    .line-numbers {
+      width: 44px;
+      padding: var(--space-3) 0;
+      background-color: rgba(5, 1, 16, 0.6);
+      border-right: 1px solid var(--border-subtle);
+      color: var(--text-tertiary);
+      font-family: var(--font-code);
+      font-size: 12px;
+      line-height: 20px;
+      text-align: right;
+      padding-right: 10px;
+      user-select: none;
       overflow: hidden;
     }
-    .preview-container iframe {
+
+    .code-content {
+      flex: 1;
+      padding: var(--space-3);
+      overflow: auto;
+      font-family: var(--font-code);
+      font-size: 12.5px;
+      line-height: 20px;
+      color: #e2e8f0;
+      white-space: pre;
+      tab-size: 2;
+    }
+
+    .code-content.flash {
+      animation: code-update-flash 0.8s ease-out;
+    }
+
+    @keyframes code-update-flash {
+      0% { background-color: rgba(139, 92, 246, 0.25); }
+      100% { background-color: transparent; }
+    }
+
+    /* Terminal View */
+    .terminal-view {
+      flex: 1;
+      display: none;
+      flex-direction: column;
+      background-color: var(--bg-deepest);
+      overflow: hidden;
+    }
+
+    .terminal-view.active {
+      display: flex;
+    }
+
+    .terminal-feed {
+      flex: 1;
+      overflow-y: auto;
+      padding: var(--space-3);
+      font-family: var(--font-code);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .log-line {
+      display: flex;
+      gap: var(--space-2);
+      margin-bottom: 2px;
+    }
+
+    .log-time { color: var(--text-tertiary); min-width: 65px; }
+    .log-badge { font-weight: 600; min-width: 70px; }
+    .log-badge.info { color: var(--accent-blue); }
+    .log-badge.success { color: var(--accent-green); }
+    .log-badge.thinking { color: #d175ff; }
+    .log-badge.warning { color: var(--accent-amber); }
+    .log-badge.error { color: var(--accent-rose); }
+    .log-badge.user { color: var(--text-primary); }
+
+    .log-msg { color: var(--text-primary); word-break: break-word; }
+
+    /* Preview Area */
+    .preview-wrapper {
+      flex: 1;
+      background-color: #000;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .preview-iframe {
       width: 100%;
       height: 100%;
       border: none;
+      background-color: #000;
     }
 
-    /* Bottom PTT Bar */
-    .bottom-bar {
-      height: 70px;
-      background: rgba(13, 6, 32, 0.98);
-      border-top: 1px solid var(--panel-border);
+    .preview-error-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(5, 1, 16, 0.9);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: var(--space-3);
+      padding: var(--space-6);
+      text-align: center;
+      z-index: 10;
+    }
+
+    .preview-error-overlay.show {
+      display: flex;
+    }
+
+    /* Bottom Command & PTT Bar */
+    .bottom-command-bar {
+      height: 60px;
+      border-top: 1px solid var(--border-subtle);
+      background-color: var(--bg-overlay);
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      padding: 0 24px;
-      gap: 20px;
+      padding: 0 var(--space-4);
+      gap: var(--space-3);
+      flex-shrink: 0;
+      z-index: 20;
     }
-    .ptt-btn {
-      flex: 1;
-      max-width: 400px;
-      height: 46px;
-      border-radius: 12px;
-      background: linear-gradient(135deg, rgba(255, 0, 127, 0.2), rgba(155, 89, 182, 0.2));
-      border: 2px solid var(--pink);
-      color: #fff;
-      font-weight: 700;
-      font-size: 0.95rem;
+
+    .ptt-trigger-btn {
+      width: 220px;
+      height: 40px;
+      border-radius: var(--radius-md);
+      background-color: var(--bg-elevated);
+      border: 1px solid var(--border-active);
+      color: var(--text-primary);
+      font-size: 13px;
+      font-weight: 600;
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 12px;
+      gap: var(--space-2);
       cursor: pointer;
       user-select: none;
-      transition: all 0.15s ease;
+      transition: var(--transition-fast);
+      flex-shrink: 0;
     }
-    .ptt-btn.active {
-      background: linear-gradient(135deg, var(--pink), var(--primary));
-      box-shadow: 0 0 25px rgba(255, 0, 127, 0.8);
-      transform: scale(0.98);
+
+    .ptt-trigger-btn:hover {
+      border-color: var(--accent-primary);
     }
-    .text-input-box {
+
+    .ptt-trigger-btn.recording {
+      background-color: rgba(244, 63, 94, 0.2);
+      border-color: var(--accent-rose);
+      color: #fff;
+    }
+
+    .command-input-wrap {
       flex: 1;
       display: flex;
-      gap: 8px;
+      align-items: center;
+      background-color: var(--bg-deepest);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 0 var(--space-3);
+      height: 40px;
+      gap: var(--space-2);
     }
-    .text-input-box input {
+
+    .command-input-wrap:focus-within {
+      border-color: var(--accent-primary);
+      box-shadow: 0 0 0 1px var(--accent-primary);
+    }
+
+    .command-input-wrap input {
       flex: 1;
-      background: #050110;
-      border: 1px solid var(--panel-border);
-      border-radius: 8px;
-      padding: 8px 14px;
-      color: #fff;
-      font-family: 'Space Grotesk', sans-serif;
+      background: transparent;
+      border: none;
+      color: var(--text-primary);
+      font-size: 13.5px;
       outline: none;
     }
-    .text-input-box input:focus {
-      border-color: var(--cyan);
+
+    .reconnect-banner {
+      position: absolute;
+      top: 48px;
+      left: 0;
+      right: 0;
+      background-color: rgba(251, 191, 36, 0.15);
+      border-bottom: 1px solid rgba(251, 191, 36, 0.3);
+      color: var(--accent-amber);
+      font-size: 12px;
+      padding: 6px var(--space-4);
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      z-index: 50;
+    }
+
+    @media (max-width: 900px) {
+      .workspace-split {
+        grid-template-columns: 1fr;
+        grid-template-rows: 1fr 1fr;
+      }
+      .panel {
+        border-right: none;
+        border-bottom: 1px solid var(--border-subtle);
+      }
+      .ptt-trigger-btn {
+        width: 140px;
+        font-size: 12px;
+      }
     }
   </style>
 </head>
 <body>
-  <header>
+  <!-- Reconnection Banner -->
+  <div id="reconnectBanner" class="reconnect-banner">
+    <span>Connection lost. Reconnecting to Yulya Studio...</span>
+    <button class="btn btn-outline btn-sm" onclick="connectWS()">Reconnect Now</button>
+  </div>
+
+  <!-- Header -->
+  <header class="studio-header">
     <div class="header-left">
-      <div class="logo">🎮 <span>YULYA STUDIO</span></div>
-      <div class="project-selector">
-        <select id="projectSelect" onchange="switchProject(this.value)">
-          {% for p in projects %}
-            <option value="{{ p.slug }}" {% if p.slug == active_slug %}selected{% endif %}>{{ p.title or p.slug }}</option>
-          {% endfor %}
-        </select>
-        <button class="btn btn-outline btn-sm" onclick="promptNewProject()">+ New Project</button>
+      <a href="/" class="logo-mark">
+        <span>YULYA</span>
+        <span style="color: var(--accent-primary);">/</span>
+        <span>STUDIO</span>
+      </a>
+
+      <!-- Project Dropdown -->
+      <button type="button" class="project-menu-btn" onclick="toggleProjectModal()">
+        <span id="folderIcon"></span>
+        <span id="currentProjectTitle">{{ active_project.title or active_slug }}</span>
+        <span style="font-size: 10px; color: var(--text-tertiary);">▼</span>
+      </button>
+    </div>
+
+    <div class="header-center">
+      <div class="status-pill">
+        <span id="wsStatusDot" class="status-dot connecting"></span>
+        <span id="wsStatusText">Connecting</span>
+      </div>
+      <div class="status-pill" id="aiStatusPill">
+        <span class="status-dot online"></span>
+        <span id="aiStatusText">AI Ready</span>
       </div>
     </div>
-    <div style="display: flex; align-items: center; gap: 14px;">
-      <span style="font-size: 0.85rem; color: var(--muted);">👤 @{{ user.username }}</span>
-      <button class="btn btn-danger btn-sm" onclick="leaveVC()">Leave VC 🚪</button>
+
+    <div class="header-right">
+      <button class="btn btn-secondary btn-sm" onclick="shareProjectLink()">
+        <span id="shareIcon"></span> Share
+      </button>
+      <button class="btn btn-secondary btn-sm" onclick="downloadZip()">
+        <span id="downloadIcon"></span> ZIP
+      </button>
+      <span class="text-xs text-muted font-mono" style="margin-left: 4px;">@{{ user.username }}</span>
+      <button class="btn btn-danger btn-sm" onclick="openLeaveModal()">
+        <span id="logoutIcon"></span> Leave VC
+      </button>
     </div>
   </header>
 
-  <div class="workspace">
+  <!-- Dual Pane Workspace -->
+  <div class="workspace-split">
     <!-- Left Pane: Code & Terminal -->
-    <div class="pane">
-      <div class="pane-header">
-        <div class="tabs">
-          <button class="tab active" onclick="showTab('terminal')">⚡ Terminal Logs</button>
-          <button class="tab" onclick="showTab('index.html')">index.html</button>
-          <button class="tab" onclick="showTab('style.css')">style.css</button>
-          <button class="tab" onclick="showTab('app.js')">app.js</button>
+    <div class="panel">
+      <div class="panel-header">
+        <div class="tabs-group">
+          <button class="tab-btn active" id="tabTerminal" onclick="switchTab('terminal')">
+            <span id="terminalTabIcon"></span> Terminal
+          </button>
+          <button class="tab-btn" id="tabIndex" onclick="switchTab('index.html')">
+            index.html
+          </button>
+          <button class="tab-btn" id="tabStyle" onclick="switchTab('style.css')">
+            style.css
+          </button>
+          <button class="tab-btn" id="tabApp" onclick="switchTab('app.js')">
+            app.js
+          </button>
         </div>
-        <div style="display: flex; align-items: center; gap: 8px; font-size: 0.8rem;">
-          <span id="connStatus" style="color: var(--green);">🟢 Gemini 3.8 Live</span>
+        <div style="display: flex; gap: var(--space-2);">
+          <button class="btn btn-outline btn-sm" id="copyCodeBtn" style="display: none;" onclick="copyCurrentCode()">
+            <span id="copyIcon"></span> Copy
+          </button>
+          <button class="btn btn-outline btn-sm" id="clearTerminalBtn" onclick="clearTerminal()">
+            Clear
+          </button>
         </div>
       </div>
-      <div id="codeDisplay" class="code-view">
-        <div class="terminal-line term-info">> [STUDIO] Initialized workspace for @{{ user.username }}.</div>
-        <div class="terminal-line term-info">> [AI ARCHITECT] Gemini 3.8 Live Extended Thinking Online.</div>
-        <div class="terminal-line term-thought">> Hold Spacebar to speak via Push-to-Talk or type below.</div>
+
+      <!-- Code Editor View -->
+      <div class="editor-wrapper" id="codeEditorView" style="display: none;">
+        <div class="line-numbers" id="lineNumbers">1</div>
+        <pre class="code-content" id="codeDisplay"></pre>
+      </div>
+
+      <!-- Terminal View -->
+      <div class="terminal-view active" id="terminalView">
+        <div class="terminal-feed" id="terminalFeed">
+          <div class="log-line">
+            <span class="log-time">00:00:00</span>
+            <span class="log-badge info">INFO</span>
+            <span class="log-msg">Workspace initialized for @{{ user.username }}. Ready to build.</span>
+          </div>
+          <div class="log-line">
+            <span class="log-time">00:00:00</span>
+            <span class="log-badge thinking">AI</span>
+            <span class="log-msg">Gemini 2.5 Flash Engine online. Hold Spacebar to speak or enter commands below.</span>
+          </div>
+        </div>
       </div>
     </div>
 
-    <!-- Right Pane: Game Preview -->
-    <div class="pane">
-      <div class="pane-header">
-        <span style="font-size: 0.85rem; font-weight: 600; color: var(--cyan);">🕹️ Live Playable Canvas</span>
-        <div style="display: flex; gap: 8px;">
-          <button class="btn btn-outline btn-sm" onclick="restartGame()">🔄 Restart</button>
-          <button class="btn btn-outline btn-sm" id="shareScreenBtn" onclick="toggleScreenShare()">🖥️ Share Screen</button>
-          <button class="btn btn-outline btn-sm" onclick="downloadZip()">⬇️ Download ZIP</button>
-          <button class="btn btn-primary btn-sm" onclick="copyPublicLink()">🔗 Share Game</button>
+    <!-- Right Pane: Game Live Preview -->
+    <div class="panel">
+      <div class="panel-header">
+        <div style="display: flex; align-items: center; gap: var(--space-2);">
+          <span class="status-dot live"></span>
+          <span class="text-xs" style="font-weight: 700; color: var(--accent-rose); letter-spacing: 0.5px;">LIVE PREVIEW</span>
+        </div>
+        <div style="display: flex; gap: var(--space-2);">
+          <button class="btn btn-outline btn-sm" onclick="restartPreview()" title="Restart Game">
+            <span id="refreshIcon"></span> Restart
+          </button>
+          <button class="btn btn-outline btn-sm" id="screenShareBtn" onclick="toggleScreenShare()" title="Stream screen to spectators">
+            <span id="screenIcon"></span> Screenshare
+          </button>
+          <button class="btn btn-outline btn-sm" onclick="openGameNewTab()" title="Open in new tab">
+            <span id="externalIcon"></span> Open
+          </button>
+          <button class="btn btn-outline btn-sm" onclick="toggleFullscreen()" title="Fullscreen">
+            <span id="maxIcon"></span> Fullscreen
+          </button>
         </div>
       </div>
-      <div class="preview-container">
-        <iframe id="gameFrame" src="/{{ user.username }}/{{ active_slug }}/"></iframe>
+
+      <div class="preview-wrapper" id="previewWrapper">
+        <!-- Sandboxed iframe (Section 27: allow-scripts strictly) -->
+        <iframe id="gameIframe" class="preview-iframe" sandbox="allow-scripts" src="/{{ user.username }}/{{ active_slug }}/"></iframe>
+
+        <!-- Game Error Overlay (Section 70) -->
+        <div id="previewErrorOverlay" class="preview-error-overlay">
+          <h3 style="color: var(--accent-rose);">Preview Interrupted</h3>
+          <p class="text-sm text-muted">The game encountered an issue. You can ask Yulya to fix it or restart.</p>
+          <div style="display: flex; gap: var(--space-3);">
+            <button class="btn btn-primary btn-sm" onclick="askYulyaToFix()">Ask Yulya to Fix</button>
+            <button class="btn btn-secondary btn-sm" onclick="restartPreview()">Restart Game</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
 
-  <!-- Bottom PTT Bar -->
-  <div class="bottom-bar">
-    <button class="ptt-btn" id="pttBtn">
-      <span id="pttIcon">🎙️</span>
-      <span id="pttText">HOLD SPACEBAR TO TALK (PTT)</span>
+  <!-- Bottom Command & PTT Bar -->
+  <footer class="bottom-command-bar">
+    <button type="button" class="ptt-trigger-btn" id="pttBtn">
+      <span id="micIcon"></span>
+      <span id="pttLabel">Hold Space to Talk</span>
     </button>
-    <div class="text-input-box">
-      <input type="text" id="commandInput" placeholder="Or type a prompt: e.g. 'Make player shoot lasers and add particles'..." onkeydown="if(event.key==='Enter') sendCommand()">
-      <button class="btn btn-primary" onclick="sendCommand()">Send ⚡</button>
+
+    <div class="command-input-wrap">
+      <input type="text" id="commandInput" placeholder="Ask Yulya to modify the game (e.g. 'Add laser cannons that shoot on Spacebar')..." autocomplete="off">
+      <button class="btn btn-primary btn-sm" id="sendBtn" onclick="sendCommand()">
+        <span id="sendIcon"></span> Send
+      </button>
+    </div>
+  </footer>
+
+  <!-- Project Selector Modal (Section 40) -->
+  <div class="modal-backdrop" id="projectModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">Select Project</h3>
+        <button class="btn btn-outline btn-sm btn-icon" onclick="ModalManager.close('projectModal')"><span id="closeProjIcon"></span></button>
+      </div>
+      <div class="modal-body" style="margin-bottom: var(--space-4);">
+        <div style="display: flex; flex-direction: column; gap: var(--space-2); max-height: 240px; overflow-y: auto;" id="projectsListWrap">
+          {% for p in projects %}
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: var(--space-2) var(--space-3); background-color: var(--bg-deepest); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); cursor: pointer;" onclick="switchProject('{{ p.slug }}')">
+              <div>
+                <div style="font-weight: 600; font-size: 13px; color: var(--text-primary);">{{ p.title or p.slug }}</div>
+                <div class="text-xs text-dim font-mono">/{{ user.username }}/{{ p.slug }}/</div>
+              </div>
+              {% if p.slug == active_slug %}
+                <span class="status-pill"><span class="status-dot online"></span> Active</span>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="modal-actions" style="justify-content: space-between;">
+        <button class="btn btn-danger btn-sm" onclick="openDeleteModal()">Delete Current</button>
+        <button class="btn btn-primary btn-sm" onclick="openNewProjectModal()">+ New Project</button>
+      </div>
     </div>
   </div>
 
+  <!-- New Project Modal -->
+  <div class="modal-backdrop" id="newProjectModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">Create New Game</h3>
+        <button class="btn btn-outline btn-sm btn-icon" onclick="ModalManager.close('newProjectModal')"><span id="closeNewProjIcon"></span></button>
+      </div>
+      <div class="modal-body">
+        <label class="text-xs text-muted" style="display: block; margin-bottom: var(--space-2); font-weight: 600;">Game Title</label>
+        <input type="text" id="newProjectTitle" class="input" placeholder="e.g. Cyber Runner 2099">
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary btn-sm" onclick="ModalManager.close('newProjectModal')">Cancel</button>
+        <button class="btn btn-primary btn-sm" onclick="createProject()">Create Game</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Delete Project Confirmation Modal (Section 74) -->
+  <div class="modal-backdrop" id="deleteModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title" style="color: var(--accent-rose);">Delete Project?</h3>
+        <button class="btn btn-outline btn-sm btn-icon" onclick="ModalManager.close('deleteModal')"><span id="closeDelIcon"></span></button>
+      </div>
+      <div class="modal-body">
+        Are you sure you want to delete <strong style="color: #fff;">{{ active_project.title or active_slug }}</strong>? This will permanently remove its code files. This cannot be undone.
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary btn-sm" onclick="ModalManager.close('deleteModal')">Cancel</button>
+        <button class="btn btn-danger btn-sm" onclick="confirmDeleteProject()">Delete Game</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Leave VC Modal (Section 54) -->
+  <div class="modal-backdrop" id="leaveModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">Leave Studio?</h3>
+        <button class="btn btn-outline btn-sm btn-icon" onclick="ModalManager.close('leaveModal')"><span id="closeLeaveIcon"></span></button>
+      </div>
+      <div class="modal-body">
+        This will disconnect Yulya from the Discord Voice Channel. Your game code and spectator links will remain securely saved in your profile.
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary btn-sm" onclick="ModalManager.close('leaveModal')">Cancel</button>
+        <button class="btn btn-danger btn-sm" onclick="confirmLeaveVC()">Leave Session</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Idle Warning Modal (Section 22) -->
+  <div class="modal-backdrop" id="idleModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">Studio Inactive</h3>
+      </div>
+      <div class="modal-body">
+        You have been away for a while. The session will automatically disconnect soon to conserve server resources.
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-primary btn-sm" onclick="stayConnected()">Stay Connected</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/js/studio.js"></script>
   <script>
     const USERNAME = "{{ user.username }}";
-    let activeSlug = "{{ active_slug }}";
+    const ACTIVE_SLUG = "{{ active_slug }}";
+    const SPECTATOR_TOKEN = "{{ spectator_token }}";
+
+    // Populate Icons
+    document.getElementById('folderIcon').innerHTML = Icons.file('icon-sm');
+    document.getElementById('shareIcon').innerHTML = Icons.share('icon-sm');
+    document.getElementById('downloadIcon').innerHTML = Icons.download('icon-sm');
+    document.getElementById('logoutIcon').innerHTML = Icons.logout('icon-sm');
+    document.getElementById('terminalTabIcon').innerHTML = Icons.terminal('icon-sm');
+    document.getElementById('refreshIcon').innerHTML = Icons.refresh('icon-sm');
+    document.getElementById('screenIcon').innerHTML = Icons.screen('icon-sm');
+    document.getElementById('externalIcon').innerHTML = Icons.external('icon-sm');
+    document.getElementById('maxIcon').innerHTML = Icons.maximize('icon-sm');
+    document.getElementById('micIcon').innerHTML = Icons.mic('icon');
+    document.getElementById('sendIcon').innerHTML = Icons.send('icon-sm');
+    document.getElementById('copyIcon').innerHTML = Icons.copy('icon-sm');
+    document.getElementById('closeProjIcon').innerHTML = Icons.x('icon-sm');
+    document.getElementById('closeNewProjIcon').innerHTML = Icons.x('icon-sm');
+    document.getElementById('closeDelIcon').innerHTML = Icons.x('icon-sm');
+    document.getElementById('closeLeaveIcon').innerHTML = Icons.x('icon-sm');
+
+    // Studio State
     let activeTab = 'terminal';
-    let fileContents = {};
+    let fileContents = {
+      'index.html': '',
+      'style.css': '',
+      'app.js': ''
+    };
+    let terminalHistory = [];
+    let commandQueue = [];
     let ws = null;
+    let heartbeatInterval = null;
     let screenStream = null;
     let screenInterval = null;
 
-    // Connect WebSocket
-    function connectWS() {
-      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      ws = new WebSocket(`${proto}//${window.location.host}/ws/studio?slug=${activeSlug}`);
+    function logTerminal(message, level = 'info') {
+      const feed = document.getElementById('terminalFeed');
+      const now = new Date();
+      const timeStr = now.toTimeString().split(' ')[0];
 
-      ws.onopen = () => {
-        logTerminal('> WebSocket connection established.', 'term-info');
-      };
+      const item = { time: timeStr, level, message };
+      terminalHistory.push(item);
 
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === 'log') {
-            logTerminal(data.message, data.cssClass || 'term-info');
-          } else if (data.type === 'code_update') {
-            logTerminal(`> [AI UPDATE] ${data.summary}`, 'term-success');
-            fileContents = data.content || {};
-            if (activeTab !== 'terminal') {
-              showTab(activeTab);
-            }
-            restartGame();
-          }
-        } catch (e) {}
-      };
-
-      ws.onclose = () => {
-        document.getElementById('connStatus').innerText = '🔴 Disconnected';
-        document.getElementById('connStatus').style.color = 'var(--pink)';
-        setTimeout(connectWS, 3000);
-      };
-    }
-    connectWS();
-
-    function logTerminal(text, cssClass = 'term-info') {
-      const term = document.getElementById('codeDisplay');
-      if (activeTab !== 'terminal') return;
       const line = document.createElement('div');
-      line.className = `terminal-line ${cssClass}`;
-      line.innerText = text;
-      term.appendChild(line);
-      term.scrollTop = term.scrollHeight;
+      line.className = 'log-line';
+
+      const timeSpan = document.createElement('span');
+      timeSpan.className = 'log-time';
+      timeSpan.textContent = timeStr;
+
+      const badgeSpan = document.createElement('span');
+      badgeSpan.className = `log-badge ${level}`;
+      badgeSpan.textContent = level.toUpperCase();
+
+      const msgSpan = document.createElement('span');
+      msgSpan.className = 'log-msg';
+      msgSpan.textContent = message;
+
+      line.appendChild(timeSpan);
+      line.appendChild(badgeSpan);
+      line.appendChild(msgSpan);
+
+      feed.appendChild(line);
+      feed.scrollTop = feed.scrollHeight;
     }
 
-    function showTab(tabName) {
-      activeTab = tabName;
-      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-      const activeBtn = Array.from(document.querySelectorAll('.tab')).find(b => b.innerText.includes(tabName));
-      if (activeBtn) activeBtn.classList.add('active');
+    function clearTerminal() {
+      document.getElementById('terminalFeed').innerHTML = '';
+      terminalHistory = [];
+    }
 
-      const disp = document.getElementById('codeDisplay');
+    // Tab Navigation
+    function switchTab(tabName) {
+      activeTab = tabName;
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+
+      const termView = document.getElementById('terminalView');
+      const editorView = document.getElementById('codeEditorView');
+      const copyBtn = document.getElementById('copyCodeBtn');
+      const clearBtn = document.getElementById('clearTerminalBtn');
+
       if (tabName === 'terminal') {
-        disp.innerHTML = '<div class="terminal-line term-info">> Terminal Logs active.</div>';
+        document.getElementById('tabTerminal').classList.add('active');
+        termView.classList.add('active');
+        editorView.style.display = 'none';
+        copyBtn.style.display = 'none';
+        clearBtn.style.display = 'inline-flex';
       } else {
-        disp.innerText = fileContents[tabName] || `Loading ${tabName}...`;
-        fetchFile(tabName);
+        const btnId = tabName === 'index.html' ? 'tabIndex' : tabName === 'style.css' ? 'tabStyle' : 'tabApp';
+        document.getElementById(btnId).classList.add('active');
+        termView.classList.remove('active');
+        editorView.style.display = 'flex';
+        copyBtn.style.display = 'inline-flex';
+        clearBtn.style.display = 'none';
+
+        displayCodeFile(tabName);
       }
     }
 
-    async function fetchFile(fname) {
+    async function loadProjectFiles() {
       try {
-        const res = await fetch(`/${USERNAME}/${activeSlug}/${fname}?t=${Date.now()}`);
-        const text = await res.text();
-        fileContents[fname] = text;
-        if (activeTab === fname) {
-          document.getElementById('codeDisplay').innerText = text;
+        const res = await fetch(`/api/project-files/${ACTIVE_SLUG}`);
+        const data = await res.json();
+        if (data.success && data.files) {
+          fileContents = data.files;
+          if (activeTab !== 'terminal') displayCodeFile(activeTab);
         }
       } catch (e) {}
     }
 
-    function restartGame() {
-      const frame = document.getElementById('gameFrame');
-      frame.src = `/${USERNAME}/${activeSlug}/?t=${Date.now()}`;
+    function displayCodeFile(fname) {
+      const code = fileContents[fname] || '/* File is empty or loading... */';
+      const disp = document.getElementById('codeDisplay');
+      disp.textContent = code;
+
+      // Update line numbers
+      const linesCount = code.split('\n').length;
+      const lines = Array.from({ length: linesCount }, (_, i) => i + 1).join('\n');
+      document.getElementById('lineNumbers').textContent = lines;
     }
+
+    function copyCurrentCode() {
+      if (activeTab !== 'terminal') {
+        const code = fileContents[activeTab] || '';
+        copyToClipboard(code, `Copied ${activeTab} to clipboard`);
+      }
+    }
+
+    // WebSocket Management (Section 19, 20, 21, 22)
+    function connectWS() {
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${proto}//${window.location.host}/ws/studio?slug=${ACTIVE_SLUG}&role=creator`;
+      
+      updateConnStatus('connecting', 'Connecting');
+
+      try {
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+          updateConnStatus('online', 'Connected');
+          document.getElementById('reconnectBanner').style.display = 'none';
+          logTerminal('WebSocket link established with Studio Server.', 'info');
+
+          // Send queued commands if any
+          while (commandQueue.length > 0) {
+            const prompt = commandQueue.shift();
+            logTerminal(`[QUEUE] Sending queued prompt: "${prompt}"`, 'info');
+            executeCommand(prompt);
+          }
+
+          // Heartbeat every 30s (Section 22)
+          if (heartbeatInterval) clearInterval(heartbeatInterval);
+          heartbeatInterval = setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'heartbeat' }));
+            }
+          }, 30000);
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'log') {
+              logTerminal(data.message, data.level || 'info');
+            } else if (data.type === 'code_update') {
+              logTerminal(`[AI] ${data.summary}`, 'success');
+              if (data.content) {
+                fileContents = data.content;
+                if (activeTab !== 'terminal') {
+                  displayCodeFile(activeTab);
+                  const disp = document.getElementById('codeDisplay');
+                  disp.classList.remove('flash');
+                  void disp.offsetWidth;
+                  disp.classList.add('flash');
+                }
+              }
+              restartPreview();
+              ToastManager.show('Project updated live', 'success');
+              setAiStatus('AI Ready', 'online');
+            } else if (data.type === 'idle_warning') {
+              ModalManager.open('idleModal');
+            } else if (data.type === 'idle_disconnect') {
+              logTerminal('Disconnected due to inactivity.', 'warning');
+              updateConnStatus('offline', 'Inactive');
+            }
+          } catch (err) {}
+        };
+
+        ws.onclose = () => {
+          updateConnStatus('offline', 'Disconnected');
+          document.getElementById('reconnectBanner').style.display = 'flex';
+          clearInterval(heartbeatInterval);
+          setTimeout(connectWS, 4000);
+        };
+      } catch (e) {
+        updateConnStatus('offline', 'Offline');
+      }
+    }
+
+    function updateConnStatus(status, label) {
+      const dot = document.getElementById('wsStatusDot');
+      const text = document.getElementById('wsStatusText');
+      dot.className = `status-dot ${status}`;
+      text.textContent = label;
+    }
+
+    function setAiStatus(text, statusClass = 'online') {
+      const pill = document.getElementById('aiStatusPill');
+      const dot = pill.querySelector('.status-dot');
+      const label = document.getElementById('aiStatusText');
+      dot.className = `status-dot ${statusClass}`;
+      label.textContent = text;
+    }
+
+    // Command Input
+    document.getElementById('commandInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        sendCommand();
+      }
+    });
 
     async function sendCommand() {
       const input = document.getElementById('commandInput');
-      const text = input.value.trim();
-      if (!text) return;
+      const prompt = input.value.trim();
+      if (!prompt) return;
       input.value = '';
 
-      logTerminal(`> You: "${text}"`, 'term-info');
-      logTerminal(`> [AI ARCHITECT] Processing changes with Gemini...`, 'term-thought');
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        commandQueue.push(prompt);
+        logTerminal(`[QUEUED] "${prompt}" (will send upon reconnection)`, 'warning');
+        ToastManager.show('Request queued (reconnecting...)', 'info');
+        return;
+      }
+
+      await executeCommand(prompt);
+    }
+
+    async function executeCommand(prompt) {
+      logTerminal(`YOU: ${prompt}`, 'user');
+      logTerminal('Gemini is processing your request...', 'thinking');
+      setAiStatus('Generating...', 'connecting');
+
+      const sendBtn = document.getElementById('sendBtn');
+      sendBtn.disabled = true;
 
       try {
         const res = await fetch('/api/modify-project', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ slug: activeSlug, prompt: text })
+          body: JSON.stringify({ slug: ACTIVE_SLUG, prompt: prompt })
         });
         const data = await res.json();
         if (!data.success) {
-          logTerminal(`> [ERROR] ${data.error}`, 'term-err');
+          logTerminal(`Error: ${data.error}`, 'error');
+          ToastManager.show(data.error || 'Failed to modify game', 'error');
+          setAiStatus('AI Ready', 'online');
         }
-      } catch (e) {
-        logTerminal(`> [ERROR] Network request failed.`, 'term-err');
+      } catch (err) {
+        logTerminal('Network error submitting command.', 'error');
+        ToastManager.show('Request failed', 'error');
+        setAiStatus('AI Ready', 'online');
+      } finally {
+        sendBtn.disabled = false;
       }
     }
 
-    // Screenshare
+    // Preview Controls
+    function restartPreview() {
+      const iframe = document.getElementById('gameIframe');
+      iframe.src = `/${USERNAME}/${ACTIVE_SLUG}/?t=${Date.now()}`;
+      document.getElementById('previewErrorOverlay').classList.remove('show');
+    }
+
+    function openGameNewTab() {
+      window.open(`/${USERNAME}/${ACTIVE_SLUG}/`, '_blank');
+    }
+
+    function toggleFullscreen() {
+      const wrapper = document.getElementById('previewWrapper');
+      if (!document.fullscreenElement) {
+        wrapper.requestFullscreen().catch(() => {});
+      } else {
+        document.exitFullscreen();
+      }
+    }
+
+    function askYulyaToFix() {
+      document.getElementById('previewErrorOverlay').classList.remove('show');
+      executeCommand("The game crashed or encountered an error. Please inspect the code, fix any syntax or logic bugs, and ensure the game loop starts smoothly.");
+    }
+
+    // Screensharing (Section 81: 1 FPS 720p throttled)
     async function toggleScreenShare() {
-      const btn = document.getElementById('shareScreenBtn');
+      const btn = document.getElementById('screenShareBtn');
       if (screenStream) {
         screenStream.getTracks().forEach(t => t.stop());
         screenStream = null;
         clearInterval(screenInterval);
-        btn.innerText = '🖥️ Share Screen';
         btn.classList.remove('btn-primary');
         btn.classList.add('btn-outline');
-        logTerminal('> [VISION] Screenshare stopped.', 'term-warn');
+        logTerminal('Screenshare stopped.', 'info');
         return;
       }
 
       try {
-        screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { width: 1920, height: 1080 } });
-        btn.innerText = '🛑 Stop Screenshare';
+        screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { width: 1280, height: 720 } });
         btn.classList.remove('btn-outline');
         btn.classList.add('btn-primary');
-        logTerminal('> [VISION] 1080p Screenshare active. Gemini 3.8 Live is seeing your screen.', 'term-success');
+        logTerminal('Screenshare active. Spectators are viewing your screen.', 'success');
 
         const video = document.createElement('video');
         video.srcObject = screenStream;
@@ -435,20 +929,61 @@
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
           const base64 = canvas.toDataURL('image/jpeg', 0.65).split(',')[1];
           ws.send(JSON.stringify({ type: 'video_frame', data: base64 }));
-        }, 1000); // 1 frame per second to conserve tokens while giving full visual reasoning
+        }, 1000); // 1 frame per second
 
         screenStream.getVideoTracks()[0].onended = () => toggleScreenShare();
       } catch (err) {
-        logTerminal(`> [VISION ERROR] ${err.message}`, 'term-err');
+        logTerminal(`Screenshare access denied: ${err.message}`, 'warning');
       }
     }
 
-    // Push-to-Talk (PTT)
+    // Push-to-Talk (Spacebar)
     let isPTT = false;
+    const pttBtn = document.getElementById('pttBtn');
+
+    function activatePTT() {
+      if (isPTT) return;
+      isPTT = true;
+      pttBtn.classList.add('recording');
+      document.getElementById('pttLabel').textContent = 'Listening... (Release)';
+      startAudioCapture();
+    }
+
+    function deactivatePTT() {
+      if (!isPTT) return;
+      isPTT = false;
+      pttBtn.classList.remove('recording');
+      document.getElementById('pttLabel').textContent = 'Hold Space to Talk';
+      stopAudioCapture();
+    }
+
+    pttBtn.addEventListener('mousedown', activatePTT);
+    pttBtn.addEventListener('mouseup', deactivatePTT);
+    pttBtn.addEventListener('mouseleave', deactivatePTT);
+
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Space' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA' && !e.repeat) {
+        e.preventDefault();
+        activatePTT();
+      }
+      // Command palette shortcut Ctrl+K / Cmd+K
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        toggleProjectModal();
+      }
+    });
+
+    window.addEventListener('keyup', (e) => {
+      if (e.code === 'Space' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        deactivatePTT();
+      }
+    });
+
     let mediaRecorder = null;
     let audioStream = null;
 
-    async function startAudioRecording() {
+    async function startAudioCapture() {
       try {
         if (!audioStream) {
           audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -460,89 +995,111 @@
           }
         };
         mediaRecorder.start(100);
-      } catch (e) {
-        console.warn('Microphone permission not granted:', e);
+      } catch (err) {
+        logTerminal('Microphone access blocked. Enable permissions to use Push-to-Talk.', 'warning');
+        ToastManager.show('Microphone blocked. Check browser permissions.', 'error');
+        deactivatePTT();
       }
     }
 
-    function stopAudioRecording() {
+    function stopAudioCapture() {
       if (mediaRecorder && mediaRecorder.state !== 'inactive') {
         mediaRecorder.stop();
       }
     }
 
-    const pttBtn = document.getElementById('pttBtn');
-
-    function activatePTT() {
-      if (isPTT) return;
-      isPTT = true;
-      pttBtn.classList.add('active');
-      document.getElementById('pttText').innerText = '🔴 LISTENING... (RELEASE TO SEND)';
-      startAudioRecording();
+    // Modal Actions
+    function toggleProjectModal() {
+      ModalManager.open('projectModal');
     }
 
-    function deactivatePTT() {
-      if (!isPTT) return;
-      isPTT = false;
-      pttBtn.classList.remove('active');
-      document.getElementById('pttText').innerText = 'HOLD SPACEBAR TO TALK (PTT)';
-      stopAudioRecording();
+    function openNewProjectModal() {
+      ModalManager.close('projectModal');
+      ModalManager.open('newProjectModal');
     }
 
-    pttBtn.addEventListener('mousedown', activatePTT);
-    pttBtn.addEventListener('mouseup', deactivatePTT);
-    pttBtn.addEventListener('mouseleave', deactivatePTT);
-
-    window.addEventListener('keydown', (e) => {
-      if (e.code === 'Space' && e.target.tagName !== 'INPUT' && !e.repeat) {
-        e.preventDefault();
-        activatePTT();
-      }
-    });
-
-    window.addEventListener('keyup', (e) => {
-      if (e.code === 'Space' && e.target.tagName !== 'INPUT') {
-        e.preventDefault();
-        deactivatePTT();
-      }
-    });
-
-    function downloadZip() {
-      window.open(`/api/download-zip/${USERNAME}/${activeSlug}`, '_blank');
+    function openDeleteModal() {
+      ModalManager.close('projectModal');
+      ModalManager.open('deleteModal');
     }
 
-    function copyPublicLink() {
-      const url = `${window.location.origin}/${USERNAME}/${activeSlug}/`;
-      navigator.clipboard.writeText(url);
-      alert(`Public Game Link copied to clipboard:\n${url}`);
+    function openLeaveModal() {
+      ModalManager.open('leaveModal');
     }
 
-    async function promptNewProject() {
-      const name = prompt('Enter a name for your new game:');
-      if (!name) return;
-      const res = await fetch('/api/create-project', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: name })
-      });
-      const data = await res.json();
-      if (data.success) {
-        window.location.href = `/studio?slug=${data.slug}`;
-      } else {
-        alert(data.error || 'Failed to create project.');
+    function stayConnected() {
+      ModalManager.close('idleModal');
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'heartbeat' }));
       }
     }
 
     function switchProject(slug) {
-      window.location.href = `/studio?slug=${slug}`;
+      window.location.href = `/studio?slug=${encodeURIComponent(slug)}`;
     }
 
-    async function leaveVC() {
-      if (confirm('Leave Discord Voice Channel and end studio session?')) {
+    async function createProject() {
+      const input = document.getElementById('newProjectTitle');
+      const title = input.value.trim();
+      if (!title) return;
+
+      try {
+        const res = await fetch('/api/create-project', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: title })
+        });
+        const data = await res.json();
+        if (data.success) {
+          window.location.href = `/studio?slug=${encodeURIComponent(data.slug)}`;
+        } else {
+          ToastManager.show(data.error || 'Failed to create game', 'error');
+        }
+      } catch (e) {
+        ToastManager.show('Network error creating game', 'error');
+      }
+    }
+
+    async function confirmDeleteProject() {
+      try {
+        const res = await fetch('/api/delete-project', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ slug: ACTIVE_SLUG })
+        });
+        const data = await res.json();
+        if (data.success) {
+          window.location.href = '/studio';
+        } else {
+          ToastManager.show(data.error || 'Failed to delete game', 'error');
+        }
+      } catch (e) {
+        ToastManager.show('Network error deleting project', 'error');
+      }
+    }
+
+    async function confirmLeaveVC() {
+      try {
         await fetch('/api/leave-vc', { method: 'POST' });
+        ToastManager.show('Disconnected from Voice Channel', 'info');
+        setTimeout(() => { window.location.href = '/'; }, 500);
+      } catch (e) {
         window.location.href = '/';
       }
     }
+
+    function shareProjectLink() {
+      const url = `${window.location.origin}/spectate/${USERNAME}/${ACTIVE_SLUG}`;
+      copyToClipboard(url, 'Spectator stream link copied to clipboard');
+    }
+
+    function downloadZip() {
+      window.location.href = `/api/download-zip/${USERNAME}/${ACTIVE_SLUG}`;
+    }
+
+    // Startup
+    loadProjectFiles();
+    connectWS();
   </script>
 </body>
 </html>

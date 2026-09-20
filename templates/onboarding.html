@@ -3,300 +3,372 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Yulya Studio Setup | Connect Gemini API Key</title>
+  <title>Connect Gemini — Yulya Studio</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/studio.css">
   <style>
-    :root {
-      --bg: #070314;
-      --panel: #0f0724;
-      --panel-border: rgba(155, 89, 182, 0.35);
-      --primary: #9b59b6;
-      --cyan: #00f0ff;
-      --pink: #ff007f;
-      --green: #39ff14;
-      --red: #ff3344;
-      --text: #ffffff;
-      --muted: #8888aa;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: 'Space Grotesk', sans-serif;
       min-height: 100vh;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 2rem;
-      background-image: 
-        radial-gradient(circle at 20% 20%, rgba(155, 89, 182, 0.2) 0%, transparent 45%),
-        radial-gradient(circle at 80% 80%, rgba(0, 240, 255, 0.15) 0%, transparent 45%);
+      padding: var(--space-4);
+      background-color: var(--bg-deepest);
     }
-    .setup-card {
-      background: var(--panel);
-      border: 1px solid var(--panel-border);
-      border-radius: 20px;
-      padding: 2.5rem;
-      max-width: 620px;
+
+    .onboarding-card {
+      background-color: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: var(--space-8);
+      max-width: 480px;
       width: 100%;
-      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6), 0 0 20px rgba(155, 89, 182, 0.2);
-      backdrop-filter: blur(16px);
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
     }
-    .logo {
-      font-size: 1.5rem;
-      font-weight: 700;
+
+    .brand-header {
       text-align: center;
-      margin-bottom: 0.5rem;
+      margin-bottom: var(--space-6);
     }
-    .logo span {
-      background: linear-gradient(135deg, var(--cyan), var(--pink));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-    .subtitle {
-      text-align: center;
-      color: var(--muted);
-      font-size: 0.95rem;
-      margin-bottom: 2rem;
-    }
-    .step {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 12px;
-      padding: 1.2rem;
-      margin-bottom: 1.2rem;
-    }
-    .step-header {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-weight: 600;
-      margin-bottom: 0.5rem;
-      color: var(--cyan);
-    }
-    .step-number {
-      background: var(--cyan);
-      color: #000;
-      width: 24px;
-      height: 24px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 0.85rem;
+
+    .brand-mark {
+      font-size: 13px;
       font-weight: 700;
+      letter-spacing: 1px;
+      color: var(--text-tertiary);
+      margin-bottom: var(--space-2);
+      text-transform: uppercase;
     }
-    .step p {
-      font-size: 0.9rem;
-      color: #ccc;
+
+    .onboarding-title {
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.4px;
+      color: var(--text-primary);
+      margin-bottom: var(--space-2);
+    }
+
+    .onboarding-sub {
+      font-size: 14px;
+      color: var(--text-secondary);
       line-height: 1.5;
     }
-    .input-group {
-      margin-top: 0.8rem;
+
+    .steps-list {
+      background-color: var(--bg-deepest);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: var(--space-4);
+      margin-bottom: var(--space-5);
     }
-    .input-group input {
-      width: 100%;
-      background: #050110;
-      border: 1px solid rgba(0, 240, 255, 0.4);
-      color: #fff;
-      padding: 12px 14px;
-      border-radius: 8px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.9rem;
-      outline: none;
-      transition: all 0.2s ease;
-    }
-    .input-group input:focus {
-      border-color: var(--pink);
-      box-shadow: 0 0 12px rgba(255, 0, 127, 0.4);
-    }
-    .terms-check {
+
+    .step-item {
       display: flex;
       align-items: flex-start;
-      gap: 10px;
-      font-size: 0.85rem;
-      color: var(--muted);
-      margin: 1.5rem 0;
-      cursor: pointer;
+      gap: var(--space-3);
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-bottom: var(--space-2);
     }
-    .terms-check input {
-      margin-top: 3px;
-      accent-color: var(--pink);
-      width: 16px;
-      height: 16px;
-      cursor: pointer;
+
+    .step-item:last-child {
+      margin-bottom: 0;
     }
-    .btn {
-      width: 100%;
-      padding: 14px;
-      border-radius: 10px;
+
+    .step-num {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background-color: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      color: var(--accent-primary);
+      font-size: 11px;
       font-weight: 700;
-      font-size: 1rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .step-link {
+      color: var(--accent-blue);
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+
+    .step-link:hover {
+      color: #fff;
+    }
+
+    .field-group {
+      margin-bottom: var(--space-4);
+    }
+
+    .field-label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: var(--space-2);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .input-wrapper {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    .input-wrapper input {
+      padding-right: 72px;
+      font-family: var(--font-code);
+      font-size: 13px;
+    }
+
+    .input-action-btn {
+      position: absolute;
+      right: 4px;
+      height: 30px;
+      padding: 0 var(--space-2);
+      background: transparent;
       border: none;
+      color: var(--text-secondary);
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 10px;
-      transition: all 0.2s ease;
+      border-radius: 4px;
     }
-    .btn-primary {
-      background: linear-gradient(135deg, var(--pink), var(--primary));
-      color: white;
-      box-shadow: 0 0 20px rgba(255, 0, 127, 0.4);
+
+    .input-action-btn:hover {
+      color: var(--text-primary);
+      background-color: var(--bg-elevated);
     }
-    .btn-primary:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 0 30px rgba(255, 0, 127, 0.7);
+
+    .terms-box {
+      display: flex;
+      align-items: flex-start;
+      gap: var(--space-2);
+      margin-bottom: var(--space-6);
+      cursor: pointer;
+      user-select: none;
     }
-    .btn-primary:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-      transform: none;
-      box-shadow: none;
+
+    .terms-box input[type="checkbox"] {
+      margin-top: 3px;
+      accent-color: var(--accent-primary);
+      width: 15px;
+      height: 15px;
+      cursor: pointer;
     }
-    .btn-discord {
-      background: #5865F2;
-      color: white;
-      box-shadow: 0 0 15px rgba(88, 101, 242, 0.4);
+
+    .terms-text {
+      font-size: 12px;
+      color: var(--text-secondary);
+      line-height: 1.4;
     }
-    .btn-discord:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 0 25px rgba(88, 101, 242, 0.7);
+
+    .security-notice {
+      margin-top: var(--space-5);
+      text-align: center;
+      font-size: 12px;
+      color: var(--text-tertiary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--space-2);
     }
-    .alert {
-      padding: 12px;
-      border-radius: 8px;
-      font-size: 0.9rem;
-      margin-bottom: 1.2rem;
+
+    .alert-banner {
       display: none;
+      padding: var(--space-3);
+      border-radius: var(--radius-md);
+      font-size: 13px;
+      line-height: 1.4;
+      margin-bottom: var(--space-4);
     }
-    .alert-error {
-      background: rgba(255, 51, 68, 0.15);
-      border: 1px solid var(--red);
-      color: #ff8899;
+
+    .alert-banner.error {
+      display: block;
+      background-color: rgba(244, 63, 94, 0.12);
+      border: 1px solid rgba(244, 63, 94, 0.3);
+      color: var(--accent-rose);
     }
-    .alert-success {
-      background: rgba(57, 255, 20, 0.15);
-      border: 1px solid var(--green);
-      color: #aaffaa;
+
+    .alert-banner.success {
+      display: block;
+      background-color: rgba(52, 211, 153, 0.12);
+      border: 1px solid rgba(52, 211, 153, 0.3);
+      color: var(--accent-green);
     }
-    .guide-link {
-      color: var(--cyan);
-      text-decoration: underline;
-      font-weight: 600;
-    }
-    .success-screen {
+
+    .success-view {
       display: none;
       text-align: center;
     }
-    .success-icon {
-      font-size: 3.5rem;
-      margin-bottom: 1rem;
+
+    .success-icon-wrap {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background-color: rgba(52, 211, 153, 0.12);
+      border: 1px solid var(--accent-green);
+      color: var(--accent-green);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto var(--space-4);
     }
   </style>
 </head>
 <body>
-  <div class="setup-card">
-    <div class="logo">🎮 <span>YULYA STUDIO</span></div>
-    <div class="subtitle">Complete your 1-minute setup to start building games with voice</div>
+  <div class="onboarding-card">
+    <div class="brand-header">
+      <div class="brand-mark">Yulya Studio</div>
+      <h1 class="onboarding-title">Connect Gemini</h1>
+      <p class="onboarding-sub">Use your personal Gemini API key to power game generation.</p>
+    </div>
 
-    <div id="alertBox" class="alert"></div>
+    <div id="alertBox" class="alert-banner"></div>
 
     {% if not user %}
-      <!-- State 1: Need to Login via Discord -->
-      <div style="text-align: center; padding: 1.5rem 0;">
-        <p style="color: var(--muted); margin-bottom: 1.5rem; line-height: 1.5;">
-          Log in with your Discord account so Yulya Studio can link your games and voice sessions directly to your Discord profile.
+      <!-- State 1: Discord Sign In -->
+      <div style="text-align: center; padding: var(--space-4) 0;">
+        <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: var(--space-6); line-height: 1.5;">
+          Sign in with Discord to link your private Studio workspace and Voice Channel sessions.
         </p>
-        <a href="/auth/login" class="btn btn-discord">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994.021-.041.001-.09-.041-.106a13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.929 1.793 8.18 1.793 12.061 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.894.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.028zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/>
-          </svg>
-          Log in with Discord
+        <a href="/auth/login" class="btn btn-primary btn-lg" style="width: 100%;">
+          <span id="discordIcon"></span> Continue with Discord
         </a>
       </div>
     {% else %}
-      <!-- State 2: Logged in, Need to input API Key -->
-      <div id="formSection">
-        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 1.5rem; padding: 10px 14px; background: rgba(0, 240, 255, 0.08); border-radius: 10px; border: 1px solid rgba(0, 240, 255, 0.2);">
-          <span style="font-size: 1.2rem;">👤</span>
-          <span style="font-size: 0.9rem;">Logged in as: <strong style="color: var(--cyan);">@{{ user.username }}</strong></span>
+      <!-- State 2: Save Gemini Key -->
+      <div id="formView">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-4); padding: var(--space-2) var(--space-3); background-color: var(--bg-deepest); border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);">
+          <span class="text-xs text-muted">Discord Account</span>
+          <span class="text-xs font-mono" style="color: var(--text-primary); font-weight: 600;">@{{ user.username }}</span>
         </div>
 
-        <div class="step">
-          <div class="step-header">
-            <div class="step-number">1</div>
-            <span>Get your Free Gemini API Key</span>
+        <div class="steps-list">
+          <div class="step-item">
+            <span class="step-num">1</span>
+            <div>Open <a href="https://aistudio.google.com/apikey" target="_blank" class="step-link">Google AI Studio</a> in a new tab</div>
           </div>
-          <p>
-            Go to <a href="https://aistudio.google.com/apikey" target="_blank" class="guide-link">Google AI Studio</a>, click <strong>"Create API Key"</strong>, and copy it. It's completely free and takes 10 seconds.
-          </p>
-        </div>
-
-        <div class="step">
-          <div class="step-header">
-            <div class="step-number">2</div>
-            <span>Paste your API Key</span>
+          <div class="step-item">
+            <span class="step-num">2</span>
+            <div>Click <strong>Create API Key</strong> and copy the token</div>
           </div>
-          <p>Paste the API key below. We will run a 1-second verification ping to make sure it works.</p>
-          <div class="input-group">
-            <input type="password" id="apiKeyInput" placeholder="AIzaSy... or AQ.Ab8RN..." autocomplete="off">
+          <div class="step-item">
+            <span class="step-num">3</span>
+            <div>Paste the key below for instant verification</div>
           </div>
         </div>
 
-        <label class="terms-check">
+        <div class="field-group">
+          <label class="field-label" for="apiKeyInput">Gemini API Key</label>
+          <div class="input-wrapper">
+            <input type="password" id="apiKeyInput" class="input" placeholder="AIzaSy..." autocomplete="off">
+            <button type="button" class="input-action-btn" id="toggleVisibilityBtn" title="Show/Hide Key">
+              <span id="eyeIcon"></span>
+            </button>
+          </div>
+        </div>
+
+        <label class="terms-box">
           <input type="checkbox" id="termsCheck">
-          <span>I agree to the Yulya Studio Terms: I will not generate malicious software or cryptocurrency miners. I am responsible for my own Google API key quotas.</span>
+          <span class="terms-text">
+            I accept the terms. I understand I am using my own Gemini API quota and will not generate malicious code or crypto miners.
+          </span>
         </label>
 
-        <button id="saveKeyBtn" class="btn btn-primary" onclick="submitApiKey()">
-          Verify & Save API Key 🚀
+        <button type="button" id="saveKeyBtn" class="btn btn-primary btn-lg" style="width: 100%;" onclick="saveApiKey()">
+          Save & Continue
         </button>
+
+        <div class="security-notice">
+          <span id="shieldIcon"></span>
+          Your key is stored securely and never shown in the UI.
+        </div>
       </div>
 
       <!-- State 3: Success Screen -->
-      <div id="successSection" class="success-screen">
-        <div class="success-icon">✨</div>
-        <h2 style="font-size: 1.6rem; color: var(--green); margin-bottom: 0.5rem;">Setup Complete!</h2>
-        <p style="color: var(--muted); margin-bottom: 1.5rem; line-height: 1.5;">
-          Your personal Gemini API key has been verified and saved to your profile.
+      <div id="successView" class="success-view">
+        <div class="success-icon-wrap" id="checkIcon"></div>
+        <h2 style="font-size: 20px; font-weight: 700; margin-bottom: var(--space-2); color: var(--text-primary);">Setup Complete</h2>
+        <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: var(--space-6); line-height: 1.5;">
+          Your Gemini key has been verified and connected to your Discord profile.
         </p>
-        <div style="background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 1.2rem; margin-bottom: 1.5rem;">
-          <h3 style="color: var(--cyan); font-size: 1rem; margin-bottom: 0.4rem;">Next Step:</h3>
-          <p style="font-size: 0.95rem; color: #fff;">
-            Return to Discord, join your voice channel, and type <code style="background: rgba(255, 0, 127, 0.2); color: var(--pink); padding: 3px 8px; border-radius: 4px; font-weight: bold;">/studio</code> in the VC chat!
-          </p>
+        <div style="background-color: var(--bg-deepest); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-4); margin-bottom: var(--space-6); text-align: left;">
+          <div class="text-xs text-muted" style="margin-bottom: 4px; font-weight: 600; text-transform: uppercase;">Next Step</div>
+          <div style="font-size: 13px; color: var(--text-primary); line-height: 1.4;">
+            Return to Discord, join a Voice Channel, and run <code class="font-mono" style="background: rgba(139, 92, 246, 0.15); color: var(--accent-primary); padding: 2px 6px; border-radius: 4px;">/studio</code> to launch your session with your friends!
+          </div>
         </div>
-        <a href="/studio" class="btn btn-primary">Open My Workspace 🛠️</a>
+        <a href="/studio" class="btn btn-primary btn-lg" style="width: 100%;">
+          Open Workspace
+        </a>
       </div>
     {% endif %}
   </div>
 
+  <script src="/static/js/studio.js"></script>
   <script>
-    async function submitApiKey() {
-      const keyInput = document.getElementById('apiKeyInput');
-      const termsCheck = document.getElementById('termsCheck');
+    const discordIconEl = document.getElementById('discordIcon');
+    if (discordIconEl) discordIconEl.innerHTML = Icons.discord('icon');
+
+    const eyeIconEl = document.getElementById('eyeIcon');
+    if (eyeIconEl) eyeIconEl.innerHTML = Icons.eye('icon-sm');
+
+    const shieldIconEl = document.getElementById('shieldIcon');
+    if (shieldIconEl) shieldIconEl.innerHTML = Icons.shield('icon-sm');
+
+    const checkIconEl = document.getElementById('checkIcon');
+    if (checkIconEl) checkIconEl.innerHTML = Icons.check('icon-lg');
+
+    // Toggle password visibility
+    const toggleBtn = document.getElementById('toggleVisibilityBtn');
+    if (toggleBtn) {
+      toggleBtn.addEventListener('click', () => {
+        const inp = document.getElementById('apiKeyInput');
+        if (inp.type === 'password') {
+          inp.type = 'text';
+          eyeIconEl.innerHTML = Icons.eyeOff('icon-sm');
+        } else {
+          inp.type = 'password';
+          eyeIconEl.innerHTML = Icons.eye('icon-sm');
+        }
+      });
+    }
+
+    async function saveApiKey() {
+      const input = document.getElementById('apiKeyInput');
+      const terms = document.getElementById('termsCheck');
       const btn = document.getElementById('saveKeyBtn');
       const alertBox = document.getElementById('alertBox');
 
+      alertBox.className = 'alert-banner';
+      alertBox.textContent = '';
       alertBox.style.display = 'none';
 
-      const key = keyInput.value.trim();
+      const key = input.value.trim();
       if (!key || key.length < 15) {
-        showAlert('Please paste a valid Gemini API key.', 'error');
+        showAlert('Please enter a valid Gemini API key.', 'error');
+        input.focus();
         return;
       }
-      if (!termsCheck.checked) {
-        showAlert('You must accept the Studio Terms & Conditions.', 'error');
+
+      if (!terms.checked) {
+        showAlert('Please accept the Studio terms to continue.', 'error');
         return;
       }
 
       btn.disabled = true;
-      btn.innerText = 'Verifying key with Google AI... ⏳';
+      input.disabled = true;
+      btn.textContent = 'Checking API key...';
 
       try {
         const res = await fetch('/api/save-key', {
@@ -307,25 +379,27 @@
         const data = await res.json();
 
         if (data.success) {
-          document.getElementById('formSection').style.display = 'none';
-          document.getElementById('successSection').style.display = 'block';
+          document.getElementById('formView').style.display = 'none';
+          document.getElementById('successView').style.display = 'block';
         } else {
-          showAlert(data.error || 'Failed to verify API key.', 'error');
+          showAlert(data.error || 'This Gemini API key could not be verified.', 'error');
           btn.disabled = false;
-          btn.innerText = 'Verify & Save API Key 🚀';
+          input.disabled = false;
+          btn.textContent = 'Save & Continue';
         }
       } catch (err) {
-        showAlert('Network error connecting to server.', 'error');
+        showAlert('Network error connecting to server. Please try again.', 'error');
         btn.disabled = false;
-        btn.innerText = 'Verify & Save API Key 🚀';
+        input.disabled = false;
+        btn.textContent = 'Save & Continue';
       }
     }
 
     function showAlert(msg, type) {
-      const alertBox = document.getElementById('alertBox');
-      alertBox.className = `alert alert-${type}`;
-      alertBox.innerText = msg;
-      alertBox.style.display = 'block';
+      const box = document.getElementById('alertBox');
+      box.className = `alert-banner ${type}`;
+      box.textContent = msg;
+      box.style.display = 'block';
     }
   </script>
 </body>

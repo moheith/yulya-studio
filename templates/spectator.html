@@ -3,213 +3,308 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Spectating {{ title }} by @{{ author }} | Yulya Studio</title>
+  <title>Spectating {{ title }} by @{{ author }} — Yulya Studio</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com">
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/studio.css">
   <style>
-    :root {
-      --bg: #070314;
-      --panel: #0d0620;
-      --panel-border: rgba(155, 89, 182, 0.3);
-      --cyan: #00f0ff;
-      --pink: #ff007f;
-      --green: #39ff14;
-      --text: #ffffff;
-      --muted: #8888aa;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: 'Space Grotesk', sans-serif;
       height: 100vh;
       display: flex;
       flex-direction: column;
       overflow: hidden;
+      background-color: var(--bg-deepest);
     }
-    header {
-      height: 56px;
-      background: rgba(13, 6, 32, 0.95);
-      border-bottom: 1px solid var(--panel-border);
+
+    .spectator-header {
+      height: 48px;
+      border-bottom: 1px solid var(--border-subtle);
+      background-color: var(--bg-overlay);
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0 20px;
+      padding: 0 var(--space-4);
+      flex-shrink: 0;
+      z-index: 20;
     }
-    .logo {
-      font-size: 1.1rem;
-      font-weight: 700;
-    }
-    .logo span {
-      background: linear-gradient(135deg, var(--cyan), var(--pink));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-    .badge-live {
-      background: rgba(255, 0, 127, 0.2);
-      border: 1px solid var(--pink);
-      color: var(--pink);
-      padding: 4px 10px;
-      border-radius: 12px;
-      font-size: 0.75rem;
-      font-weight: 700;
+
+    .header-info {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: var(--space-3);
     }
-    .dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--pink);
-      box-shadow: 0 0 8px var(--pink);
-      animation: pulse 1.5s infinite;
-    }
-    @keyframes pulse { 0% { opacity: 0.4; } 50% { opacity: 1; } 100% { opacity: 0.4; } }
 
-    .workspace {
+    .stream-split {
       flex: 1;
       display: grid;
-      grid-template-columns: 420px 1fr;
+      grid-template-columns: 380px 1fr;
       overflow: hidden;
+      background-color: var(--bg-base);
     }
-    .pane {
+
+    .stream-panel {
       display: flex;
       flex-direction: column;
-      border-right: 1px solid var(--panel-border);
       overflow: hidden;
-      background: var(--panel);
+      border-right: 1px solid var(--border-subtle);
+      background-color: var(--bg-base);
     }
-    .pane:last-child { border-right: none; }
-    .pane-header {
+
+    .stream-panel:last-child {
+      border-right: none;
+    }
+
+    .stream-panel-header {
       height: 40px;
-      background: rgba(7, 3, 20, 0.8);
-      border-bottom: 1px solid var(--panel-border);
+      border-bottom: 1px solid var(--border-subtle);
+      background-color: var(--bg-deepest);
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0 16px;
-      font-size: 0.85rem;
-      font-weight: 600;
+      padding: 0 var(--space-3);
+      flex-shrink: 0;
     }
-    .code-view {
+
+    .activity-feed {
       flex: 1;
-      overflow: auto;
-      padding: 14px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.8rem;
-      line-height: 1.5;
-      color: #ccc;
-      white-space: pre-wrap;
-      word-break: break-all;
-      background: #050110;
+      overflow-y: auto;
+      padding: var(--space-3);
+      font-family: var(--font-code);
+      font-size: 12px;
+      line-height: 1.6;
+      background-color: var(--bg-deepest);
     }
-    .preview-container {
-      flex: 1;
-      background: #000;
+
+    .screen-broadcast-wrap {
+      height: 200px;
+      background-color: #000;
+      border-bottom: 1px solid var(--border-subtle);
+      display: none;
       position: relative;
     }
-    iframe {
+
+    .screen-broadcast-wrap.active {
+      display: block;
+    }
+
+    .screen-broadcast-img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .game-viewport {
+      flex: 1;
+      position: relative;
+      background-color: #000;
+      overflow: hidden;
+    }
+
+    .game-viewport iframe {
       width: 100%;
       height: 100%;
       border: none;
     }
-    .btn {
-      padding: 4px 12px;
-      border-radius: 6px;
-      font-size: 0.8rem;
-      font-weight: 600;
-      cursor: pointer;
-      border: 1px solid var(--cyan);
-      background: transparent;
-      color: var(--cyan);
-      text-decoration: none;
-    }
-    .btn:hover {
-      background: rgba(0, 240, 255, 0.1);
+
+    @media (max-width: 860px) {
+      .stream-split {
+        grid-template-columns: 1fr;
+        grid-template-rows: 240px 1fr;
+      }
+      .stream-panel {
+        border-right: none;
+        border-bottom: 1px solid var(--border-subtle);
+      }
     }
   </style>
 </head>
 <body>
-  <header>
-    <div style="display: flex; align-items: center; gap: 14px;">
-      <a href="/" class="logo" style="text-decoration: none; color: inherit;">🎮 <span>YULYA STUDIO</span></a>
-      <span style="font-size: 0.85rem; color: var(--muted);">Spectating: <strong style="color: #fff;">{{ title }}</strong> by <span style="color: var(--pink);">@{{ author }}</span></span>
-      <div class="badge-live"><div class="dot"></div> LIVE BUILD</div>
+  <header class="spectator-header">
+    <div class="header-info">
+      <a href="/" class="brand" style="font-size: 13px;">
+        <span>YULYA</span>
+        <span class="brand-accent">/</span>
+        <span>STREAM</span>
+      </a>
+      <div style="font-size: 13px; color: var(--text-secondary);">
+        Spectating: <strong style="color: var(--text-primary);">{{ title }}</strong> by <span style="color: var(--accent-primary);">@{{ author }}</span>
+      </div>
+      <div class="status-pill">
+        <span class="status-dot live"></span>
+        <span style="font-weight: 700; color: var(--accent-rose); letter-spacing: 0.5px;">LIVE</span>
+      </div>
+      <div class="status-pill" id="creatorStatusPill">
+        <span class="status-dot online" id="creatorStatusDot"></span>
+        <span id="creatorStatusText">Creator Online</span>
+      </div>
     </div>
-    <div style="display: flex; align-items: center; gap: 10px;">
-      <button class="btn" onclick="restartGame()">🔄 Reload Game</button>
-      <a href="/" class="btn">Arcade Gallery</a>
+
+    <div style="display: flex; align-items: center; gap: var(--space-2);">
+      <button class="btn btn-outline btn-sm" onclick="reloadGame()">
+        <span id="reloadIcon"></span> Reload Game
+      </button>
+      <button class="btn btn-outline btn-sm" onclick="toggleFullscreen()">
+        <span id="maxIcon"></span> Fullscreen
+      </button>
+      <button class="btn btn-secondary btn-sm" onclick="copySpectatorLink()">
+        <span id="shareIcon"></span> Share Stream
+      </button>
+      <a href="/" class="btn btn-secondary btn-sm">
+        Arcade
+      </a>
     </div>
   </header>
 
-  <div class="workspace">
-    <div class="pane">
-      <div class="pane-header">
-        <span style="color: var(--cyan);">⚡ Live Terminal & Code Stream</span>
-        <span id="connStatus" style="color: var(--green); font-size: 0.75rem;">🟢 Live</span>
+  <div class="stream-split">
+    <!-- Left: Activity & Live Build Stream -->
+    <div class="stream-panel">
+      <div class="stream-panel-header">
+        <span class="text-xs" style="font-weight: 600; color: var(--accent-blue); text-transform: uppercase; letter-spacing: 0.5px;">Live Activity Stream</span>
+        <span class="text-xs text-muted" id="wsConnLabel">Connected</span>
       </div>
-      <div id="codeDisplay" class="code-view">
-        <div style="color: var(--cyan); margin-bottom: 4px;">> [SPECTATOR] Connected to session of @{{ author }}.</div>
-        <div style="color: #d175ff; margin-bottom: 4px;">> Code updates and file changes will stream here in real time.</div>
+
+      <!-- Creator Screenshare Feed (if broadcasted) -->
+      <div class="screen-broadcast-wrap" id="screenWrap">
+        <div style="position: absolute; top: 6px; left: 8px; z-index: 5; font-size: 11px; background: rgba(0,0,0,0.7); padding: 2px 6px; border-radius: 4px; color: var(--accent-green);">
+          Creator Screen Live
+        </div>
+        <img id="screenImg" class="screen-broadcast-img" alt="Creator Screen Stream">
+      </div>
+
+      <!-- Live Terminal Feed -->
+      <div class="activity-feed" id="activityFeed">
+        <div class="log-line">
+          <span class="log-time">00:00:00</span>
+          <span class="log-badge info">STREAM</span>
+          <span class="log-msg">Joined live spectator session of @{{ author }}.</span>
+        </div>
+        <div class="log-line">
+          <span class="log-time">00:00:00</span>
+          <span class="log-badge thinking">LIVE</span>
+          <span class="log-msg">Live code modifications and AI generations will display here. Play the game on the right with your keyboard!</span>
+        </div>
       </div>
     </div>
 
-    <div class="pane">
-      <div class="pane-header">
-        <span style="color: var(--green);">🕹️ Playable Game (Play with your keyboard!)</span>
-        <span style="font-size: 0.75rem; color: var(--muted);">Auto-reloads on live code edits</span>
+    <!-- Right: Playable Game View -->
+    <div class="stream-panel">
+      <div class="stream-panel-header">
+        <span class="text-xs" style="font-weight: 600; color: var(--accent-green); text-transform: uppercase; letter-spacing: 0.5px;">Interactive Game Canvas</span>
+        <span class="text-xs text-muted">Auto-reloads when code changes</span>
       </div>
-      <div class="preview-container">
-        <iframe id="gameFrame" src="/{{ author }}/{{ slug }}/"></iframe>
+      <div class="game-viewport" id="viewportWrapper">
+        <!-- Sandboxed iframe (Section 27 & 59: allow-scripts ONLY) -->
+        <iframe id="gameIframe" sandbox="allow-scripts" src="/{{ author }}/{{ slug }}/"></iframe>
       </div>
     </div>
   </div>
 
+  <script src="/static/js/studio.js"></script>
   <script>
     const AUTHOR = "{{ author }}";
     const SLUG = "{{ slug }}";
+    const SPECTATOR_TOKEN = "{{ spectator_token }}";
 
-    function restartGame() {
-      const frame = document.getElementById('gameFrame');
-      frame.src = `/${AUTHOR}/${SLUG}/?t=${Date.now()}`;
+    document.getElementById('reloadIcon').innerHTML = Icons.refresh('icon-sm');
+    document.getElementById('maxIcon').innerHTML = Icons.maximize('icon-sm');
+    document.getElementById('shareIcon').innerHTML = Icons.share('icon-sm');
+
+    function reloadGame() {
+      const iframe = document.getElementById('gameIframe');
+      iframe.src = `/${AUTHOR}/${SLUG}/?t=${Date.now()}`;
+      ToastManager.show('Reloaded game canvas', 'info');
     }
 
-    function logTerminal(text, color = '#eee') {
-      const term = document.getElementById('codeDisplay');
+    function toggleFullscreen() {
+      const wrap = document.getElementById('viewportWrapper');
+      if (!document.fullscreenElement) {
+        wrap.requestFullscreen().catch(() => {});
+      } else {
+        document.exitFullscreen();
+      }
+    }
+
+    function copySpectatorLink() {
+      copyToClipboard(window.location.href, 'Spectator stream link copied');
+    }
+
+    function logActivity(msg, badge = 'INFO', badgeClass = 'info') {
+      const feed = document.getElementById('activityFeed');
+      const now = new Date();
+      const timeStr = now.toTimeString().split(' ')[0];
+
       const line = document.createElement('div');
-      line.style.color = color;
-      line.style.marginBottom = '4px';
-      line.innerText = text;
-      term.appendChild(line);
-      term.scrollTop = term.scrollHeight;
+      line.className = 'log-line';
+
+      const timeSpan = document.createElement('span');
+      timeSpan.className = 'log-time';
+      timeSpan.textContent = timeStr;
+
+      const bSpan = document.createElement('span');
+      bSpan.className = `log-badge ${badgeClass}`;
+      bSpan.textContent = badge;
+
+      const mSpan = document.createElement('span');
+      mSpan.className = 'log-msg';
+      mSpan.textContent = msg;
+
+      line.appendChild(timeSpan);
+      line.appendChild(bSpan);
+      line.appendChild(mSpan);
+
+      feed.appendChild(line);
+      feed.scrollTop = feed.scrollHeight;
     }
 
     // Connect Spectator WebSocket
-    function connectWS() {
+    let ws = null;
+
+    function connectSpectatorWS() {
       const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const ws = new WebSocket(`${proto}//${window.location.host}/ws/studio?slug=${SLUG}&spectator=1`);
+      const wsUrl = `${proto}//${window.location.host}/ws/studio?slug=${SLUG}&token=${SPECTATOR_TOKEN}&role=spectator`;
+
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        document.getElementById('wsConnLabel').textContent = 'Live Link Active';
+        logActivity('Connected to real-time build stream.', 'STREAM', 'info');
+      };
 
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
           if (data.type === 'log') {
-            logTerminal(data.message, '#00f0ff');
+            logActivity(data.message, data.level ? data.level.toUpperCase() : 'AI', data.level || 'info');
           } else if (data.type === 'code_update') {
-            logTerminal(`> [CODE UPDATE] ${data.summary}`, '#39ff14');
-            restartGame();
+            logActivity(`Code update: ${data.summary}`, 'UPDATE', 'success');
+            reloadGame();
+          } else if (data.type === 'screen_frame') {
+            const screenWrap = document.getElementById('screenWrap');
+            const screenImg = document.getElementById('screenImg');
+            screenWrap.classList.add('active');
+            screenImg.src = `data:image/jpeg;base64,${data.data}`;
+          } else if (data.type === 'status') {
+            const dot = document.getElementById('creatorStatusDot');
+            const text = document.getElementById('creatorStatusText');
+            if (data.creator_online) {
+              dot.className = 'status-dot online';
+              text.textContent = 'Creator Online';
+            } else {
+              dot.className = 'status-dot offline';
+              text.textContent = 'Creator Offline';
+            }
           }
         } catch (e) {}
       };
 
       ws.onclose = () => {
-        document.getElementById('connStatus').innerText = '🔴 Reconnecting...';
-        document.getElementById('connStatus').style.color = '#ff007f';
-        setTimeout(connectWS, 3000);
+        document.getElementById('wsConnLabel').textContent = 'Reconnecting...';
+        setTimeout(connectSpectatorWS, 3000);
       };
     }
-    connectWS();
+
+    connectSpectatorWS();
   </script>
 </body>
 </html>

@@ -3,299 +3,467 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Yulya Studio | Arcade & AI Game Creator</title>
+  <title>Yulya Studio — The AI Game Creation Platform</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/studio.css">
   <style>
-    :root {
-      --bg: #070314;
-      --panel: #0f0724;
-      --panel-border: rgba(155, 89, 182, 0.3);
-      --primary: #9b59b6;
-      --cyan: #00f0ff;
-      --pink: #ff007f;
-      --green: #39ff14;
-      --text: #ffffff;
-      --muted: #8888aa;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: 'Space Grotesk', sans-serif;
-      min-height: 100vh;
-      overflow-x: hidden;
-      background-image: 
-        radial-gradient(circle at 15% 15%, rgba(155, 89, 182, 0.15) 0%, transparent 40%),
-        radial-gradient(circle at 85% 85%, rgba(0, 240, 255, 0.12) 0%, transparent 40%);
-    }
-    header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 1.5rem 3rem;
-      border-bottom: 1px solid var(--panel-border);
+    .site-header {
+      height: 56px;
+      border-bottom: 1px solid var(--border-subtle);
+      background-color: var(--bg-overlay);
       backdrop-filter: blur(12px);
       position: sticky;
       top: 0;
       z-index: 100;
-      background: rgba(7, 3, 20, 0.85);
-    }
-    .logo {
       display: flex;
       align-items: center;
-      gap: 12px;
-      font-size: 1.4rem;
+      justify-content: space-between;
+      padding: 0 var(--space-8);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+      font-size: 14px;
       font-weight: 700;
-      letter-spacing: 1px;
+      letter-spacing: 0.5px;
     }
-    .logo span {
-      background: linear-gradient(135deg, var(--cyan), var(--pink));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
+
+    .brand-accent {
+      color: var(--accent-primary);
     }
-    .nav-actions {
+
+    .nav-links {
       display: flex;
       align-items: center;
-      gap: 16px;
+      gap: var(--space-6);
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary);
     }
-    .btn {
-      padding: 10px 22px;
-      border-radius: 10px;
-      font-weight: 600;
-      font-size: 0.95rem;
-      text-decoration: none;
-      cursor: pointer;
+
+    .nav-links a:hover {
+      color: var(--text-primary);
+    }
+
+    .hero-section {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: var(--space-12) var(--space-6) var(--space-8);
+      text-align: center;
+    }
+
+    .hero-badge {
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      transition: all 0.2s ease;
-      border: none;
+      gap: var(--space-2);
+      padding: 4px var(--space-3);
+      border-radius: 999px;
+      background-color: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      margin-bottom: var(--space-4);
     }
-    .btn-primary {
-      background: linear-gradient(135deg, var(--pink), var(--primary));
-      color: white;
-      box-shadow: 0 0 15px rgba(255, 0, 127, 0.4);
-    }
-    .btn-primary:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 0 25px rgba(255, 0, 127, 0.7);
-    }
-    .btn-outline {
-      background: transparent;
-      border: 1px solid var(--cyan);
-      color: var(--cyan);
-    }
-    .btn-outline:hover {
-      background: rgba(0, 240, 255, 0.1);
-      box-shadow: 0 0 15px rgba(0, 240, 255, 0.4);
-    }
-    .hero {
-      text-align: center;
-      padding: 5rem 1.5rem 3rem;
-      max-width: 900px;
-      margin: 0 auto;
-    }
-    .hero-badge {
-      display: inline-block;
-      padding: 6px 14px;
-      background: rgba(0, 240, 255, 0.1);
-      border: 1px solid var(--cyan);
-      color: var(--cyan);
-      border-radius: 20px;
-      font-size: 0.85rem;
-      font-weight: 600;
-      margin-bottom: 1.5rem;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-    }
-    .hero h1 {
-      font-size: 3.2rem;
-      line-height: 1.15;
-      margin-bottom: 1.5rem;
-    }
-    .hero h1 span {
-      background: linear-gradient(135deg, var(--cyan), var(--pink));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-    .hero p {
-      font-size: 1.2rem;
-      color: var(--muted);
-      line-height: 1.6;
-      margin-bottom: 2.5rem;
-    }
-    .gallery-container {
-      max-width: 1280px;
-      margin: 0 auto;
-      padding: 2rem 2rem 5rem;
-    }
-    .gallery-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 2rem;
-      border-bottom: 1px solid var(--panel-border);
-      padding-bottom: 1rem;
-    }
-    .gallery-title {
-      font-size: 1.6rem;
+
+    .hero-title {
+      font-size: 38px;
       font-weight: 700;
-      display: flex;
-      align-items: center;
-      gap: 10px;
+      letter-spacing: -0.8px;
+      line-height: 1.15;
+      margin-bottom: var(--space-3);
+      color: var(--text-primary);
     }
-    .games-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-      gap: 24px;
+
+    .hero-subtitle {
+      font-size: 16px;
+      color: var(--text-secondary);
+      max-width: 580px;
+      margin: 0 auto var(--space-6);
+      line-height: 1.5;
     }
-    .game-card {
-      background: var(--panel);
-      border: 1px solid var(--panel-border);
-      border-radius: 16px;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-      transition: all 0.25s ease;
-      position: relative;
-    }
-    .game-card:hover {
-      transform: translateY(-4px);
-      border-color: var(--cyan);
-      box-shadow: 0 10px 25px rgba(0, 240, 255, 0.25);
-    }
-    .card-preview {
-      height: 180px;
-      background: #000;
-      position: relative;
+
+    .hero-actions {
       display: flex;
       align-items: center;
       justify-content: center;
-      overflow: hidden;
+      gap: var(--space-3);
     }
-    .card-preview iframe {
+
+    .gallery-section {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 var(--space-6) var(--space-16);
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: var(--space-5);
+      border-bottom: 1px solid var(--border-subtle);
+      padding-bottom: var(--space-3);
+    }
+
+    .grid-container {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: var(--space-5);
+    }
+
+    .game-card {
+      background-color: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transition: var(--transition-fast);
+    }
+
+    .game-card:hover {
+      border-color: var(--border-active);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    }
+
+    .card-preview-wrap {
+      position: relative;
+      height: 190px;
+      background-color: #000;
+      overflow: hidden;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .card-preview-wrap iframe {
       width: 600px;
-      height: 360px;
+      height: 380px;
       transform: scale(0.5);
-      transform-origin: center;
+      transform-origin: top left;
       border: none;
       pointer-events: none;
+      background: #000;
     }
-    .card-body {
-      padding: 20px;
+
+    .card-preview-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(5, 1, 16, 0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: var(--transition-fast);
+    }
+
+    .game-card:hover .card-preview-overlay {
+      opacity: 1;
+    }
+
+    .card-content {
+      padding: var(--space-4);
       display: flex;
       flex-direction: column;
       flex: 1;
     }
+
     .card-title {
-      font-size: 1.25rem;
-      font-weight: 700;
-      margin-bottom: 6px;
-      color: #fff;
-    }
-    .card-author {
-      font-size: 0.85rem;
-      color: var(--muted);
-      margin-bottom: 12px;
-    }
-    .card-author span {
-      color: var(--pink);
+      font-size: 16px;
       font-weight: 600;
+      margin-bottom: 2px;
+      color: var(--text-primary);
     }
+
+    .card-author {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-bottom: var(--space-3);
+    }
+
+    .card-author span {
+      color: var(--accent-primary);
+    }
+
     .card-desc {
-      font-size: 0.9rem;
-      color: #aaa;
+      font-size: 13px;
+      color: var(--text-secondary);
       line-height: 1.4;
-      margin-bottom: 18px;
+      margin-bottom: var(--space-4);
       flex: 1;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
     }
-    .card-actions {
+
+    .card-tags {
       display: flex;
-      gap: 10px;
+      gap: var(--space-1);
+      margin-bottom: var(--space-4);
+      flex-wrap: wrap;
     }
-    .card-actions .btn {
+
+    .tag-pill {
+      font-size: 11px;
+      font-family: var(--font-code);
+      background-color: var(--bg-deepest);
+      border: 1px solid var(--border-subtle);
+      border-radius: 4px;
+      padding: 1px 6px;
+      color: var(--text-tertiary);
+    }
+
+    .card-footer {
+      display: flex;
+      gap: var(--space-2);
+      border-top: 1px solid var(--border-subtle);
+      padding-top: var(--space-3);
+    }
+
+    .card-footer .btn {
       flex: 1;
-      justify-content: center;
-      padding: 8px 12px;
-      font-size: 0.88rem;
+    }
+
+    .state-box {
+      grid-column: 1 / -1;
+      text-align: center;
+      padding: var(--space-12) var(--space-4);
+      background-color: var(--bg-elevated);
+      border: 1px dashed var(--border-subtle);
+      border-radius: var(--radius-lg);
+    }
+
+    .state-box h3 {
+      font-size: 16px;
+      margin-bottom: var(--space-2);
+      color: var(--text-primary);
+    }
+
+    .state-box p {
+      font-size: 14px;
+      margin-bottom: var(--space-4);
+      color: var(--text-secondary);
     }
   </style>
 </head>
 <body>
-  <header>
-    <div class="logo">
-      🎮 <span>YULYA STUDIO</span>
+  <header class="site-header">
+    <div style="display: flex; align-items: center; gap: var(--space-8);">
+      <a href="/" class="brand">
+        <span>YULYA</span>
+        <span class="brand-accent">/</span>
+        <span>STUDIO</span>
+      </a>
+      <nav class="nav-links">
+        <a href="#arcade" style="color: var(--text-primary);">Arcade</a>
+        <a href="/studio">Workspace</a>
+      </nav>
     </div>
-    <div class="nav-actions">
-      <a href="/studio" class="btn btn-primary">Launch Studio 🚀</a>
+    <div style="display: flex; align-items: center; gap: var(--space-3);">
+      {% if user %}
+        <span class="text-xs text-muted font-mono">@{{ user.username }}</span>
+        <a href="/studio" class="btn btn-primary btn-sm">Launch Studio</a>
+      {% else %}
+        <a href="/auth/login" class="btn btn-secondary btn-sm">Sign In</a>
+        <a href="/studio" class="btn btn-primary btn-sm">Launch Studio</a>
+      {% endif %}
     </div>
   </header>
 
-  <section class="hero">
-    <div class="hero-badge">AI Voice-Powered Game Studio</div>
-    <h1>Speak Your Games Into <span>Existence</span></h1>
-    <p>Talk naturally in Discord Voice with Gemini 3.8 Live Extended Thinking. Watch your games code themselves and deploy live to the world in real-time.</p>
-    <div style="display: flex; gap: 16px; justify-content: center;">
-      <a href="/studio" class="btn btn-primary" style="font-size: 1.1rem; padding: 14px 32px;">Start Building in VC 🎙️</a>
-      <a href="#arcade" class="btn btn-outline" style="font-size: 1.1rem; padding: 14px 28px;">Browse Arcade 🕹️</a>
-    </div>
-  </section>
-
-  <div id="arcade" class="gallery-container">
-    <div class="gallery-header">
-      <h2 class="gallery-title">🕹️ Community Arcade Showcase</h2>
-      <span style="color: var(--muted); font-size: 0.9rem;">Play directly in your browser or Discord Activity</span>
-    </div>
-    <div class="games-grid" id="gamesGrid">
-      <!-- Dynamic Games List Loaded via JS -->
-      <div style="grid-column: 1 / -1; text-align: center; padding: 3rem; color: var(--muted);">
-        Loading community creations...
+  <main>
+    <section class="hero-section">
+      <div class="hero-badge">
+        <span class="status-dot online"></span>
+        Voice-Powered AI Game Engine
       </div>
-    </div>
-  </div>
+      <h1 class="hero-title">Build Games by Talking</h1>
+      <p class="hero-subtitle">
+        Join Discord Voice, talk to Yulya, and watch complete HTML5 games generate and modify in real time. Spectators can watch live and play instantly.
+      </p>
+      <div class="hero-actions">
+        <a href="/studio" class="btn btn-primary btn-lg">Start Building</a>
+        <a href="#arcade" class="btn btn-secondary btn-lg">Browse Arcade</a>
+      </div>
+    </section>
 
+    <section id="arcade" class="gallery-section">
+      <div class="section-header">
+        <div>
+          <h2>Community Arcade</h2>
+          <p class="text-sm text-muted">Playable games built with Yulya Studio</p>
+        </div>
+        <button id="refreshBtn" class="btn btn-outline btn-sm" onclick="loadArcadeGames()">
+          <span id="refreshIcon"></span> Refresh
+        </button>
+      </div>
+
+      <div class="grid-container" id="gamesGrid">
+        <!-- Skeleton Loaders -->
+        <div class="card" style="height: 340px;">
+          <div class="skeleton" style="height: 190px; margin-bottom: 16px;"></div>
+          <div class="skeleton" style="height: 20px; width: 60%; margin-bottom: 8px;"></div>
+          <div class="skeleton" style="height: 14px; width: 40%; margin-bottom: 16px;"></div>
+          <div class="skeleton" style="height: 32px; width: 100%;"></div>
+        </div>
+        <div class="card" style="height: 340px;">
+          <div class="skeleton" style="height: 190px; margin-bottom: 16px;"></div>
+          <div class="skeleton" style="height: 20px; width: 60%; margin-bottom: 8px;"></div>
+          <div class="skeleton" style="height: 14px; width: 40%; margin-bottom: 16px;"></div>
+          <div class="skeleton" style="height: 32px; width: 100%;"></div>
+        </div>
+        <div class="card" style="height: 340px;">
+          <div class="skeleton" style="height: 190px; margin-bottom: 16px;"></div>
+          <div class="skeleton" style="height: 20px; width: 60%; margin-bottom: 8px;"></div>
+          <div class="skeleton" style="height: 14px; width: 40%; margin-bottom: 16px;"></div>
+          <div class="skeleton" style="height: 32px; width: 100%;"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/js/studio.js"></script>
   <script>
-    async function loadGames() {
+    document.getElementById('refreshIcon').innerHTML = Icons.refresh('icon-sm');
+
+    async function loadArcadeGames() {
+      const grid = document.getElementById('gamesGrid');
+      
       try {
         const res = await fetch('/api/community-projects');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const games = await res.json();
-        const grid = document.getElementById('gamesGrid');
+        
         grid.innerHTML = '';
 
         if (!games || games.length === 0) {
-          grid.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; padding: 3rem; color: var(--muted);">No games published yet. Be the first to build one!</div>';
+          // Empty state (Section 68)
+          const emptyBox = document.createElement('div');
+          emptyBox.className = 'state-box';
+          emptyBox.innerHTML = `
+            <h3>The arcade is quiet.</h3>
+            <p>Be the first creator to build a game with Yulya.</p>
+            <a href="/studio" class="btn btn-primary btn-sm">Launch Studio</a>
+          `;
+          grid.appendChild(emptyBox);
           return;
         }
 
-        games.forEach(g => {
+        games.forEach(game => {
           const card = document.createElement('div');
           card.className = 'game-card';
-          const gameUrl = `/${g.username}/${g.slug}/`;
-          const spectateUrl = `/spectate/${g.username}/${g.slug}`;
 
-          card.innerHTML = `
-            <div class="card-preview">
-              <iframe src="${gameUrl}"></iframe>
-            </div>
-            <div class="card-body">
-              <div class="card-title">${g.title || g.slug}</div>
-              <div class="card-author">By <span>@${g.username}</span></div>
-              <div class="card-desc">${g.description || 'Interactive web game built with Yulya Studio.'}</div>
-              <div class="card-actions">
-                <a href="${gameUrl}" target="_blank" class="btn btn-primary">Play Game 🎮</a>
-                <a href="${spectateUrl}" class="btn btn-outline">Spectate HUD ⚡</a>
-              </div>
-            </div>
-          `;
+          const gameUrl = `/${encodeURIComponent(game.username)}/${encodeURIComponent(game.slug)}/`;
+          const spectateUrl = `/spectate/${encodeURIComponent(game.username)}/${encodeURIComponent(game.slug)}`;
+
+          // Preview wrap
+          const previewWrap = document.createElement('div');
+          previewWrap.className = 'card-preview-wrap';
+          
+          // Sandboxed iframe (Section 27 & 61: allow-scripts ONLY)
+          const iframe = document.createElement('iframe');
+          iframe.sandbox = 'allow-scripts';
+          iframe.loading = 'lazy';
+          iframe.src = gameUrl;
+          previewWrap.appendChild(iframe);
+
+          const overlay = document.createElement('div');
+          overlay.className = 'card-preview-overlay';
+          const playOverlayBtn = document.createElement('a');
+          playOverlayBtn.href = gameUrl;
+          playOverlayBtn.target = '_blank';
+          playOverlayBtn.className = 'btn btn-primary btn-sm';
+          playOverlayBtn.innerHTML = `${Icons.play('icon-sm')} Play Game`;
+          overlay.appendChild(playOverlayBtn);
+          previewWrap.appendChild(overlay);
+
+          // Card Content
+          const content = document.createElement('div');
+          content.className = 'card-content';
+
+          const title = document.createElement('h3');
+          title.className = 'card-title';
+          title.textContent = game.title || game.slug;
+
+          const author = document.createElement('div');
+          author.className = 'card-author';
+          author.innerHTML = `By <span>@${game.username}</span>`;
+
+          const desc = document.createElement('p');
+          desc.className = 'card-desc';
+          desc.textContent = game.description || 'HTML5 Canvas game created with Yulya Studio.';
+
+          // Tags
+          const tagsWrap = document.createElement('div');
+          tagsWrap.className = 'card-tags';
+          const tags = game.tags || ['canvas', 'game'];
+          tags.slice(0, 3).forEach(t => {
+            const pill = document.createElement('span');
+            pill.className = 'tag-pill';
+            pill.textContent = t;
+            tagsWrap.appendChild(pill);
+          });
+
+          // Card Footer
+          const footer = document.createElement('div');
+          footer.className = 'card-footer';
+
+          const playBtn = document.createElement('a');
+          playBtn.href = gameUrl;
+          playBtn.target = '_blank';
+          playBtn.className = 'btn btn-primary btn-sm';
+          playBtn.innerHTML = `${Icons.play('icon-sm')} Play`;
+
+          const spectateBtn = document.createElement('a');
+          spectateBtn.href = spectateUrl;
+          spectateBtn.className = 'btn btn-secondary btn-sm';
+          spectateBtn.innerHTML = `${Icons.terminal('icon-sm')} Spectate`;
+
+          const shareBtn = document.createElement('button');
+          shareBtn.className = 'btn btn-outline btn-sm btn-icon';
+          shareBtn.title = 'Copy Link';
+          shareBtn.innerHTML = Icons.share('icon-sm');
+          shareBtn.onclick = () => {
+            const fullUrl = `${window.location.origin}${gameUrl}`;
+            copyToClipboard(fullUrl, 'Game link copied');
+          };
+
+          footer.appendChild(playBtn);
+          footer.appendChild(spectateBtn);
+          footer.appendChild(shareBtn);
+
+          content.appendChild(title);
+          content.appendChild(author);
+          content.appendChild(desc);
+          content.appendChild(tagsWrap);
+          content.appendChild(footer);
+
+          card.appendChild(previewWrap);
+          card.appendChild(content);
+
           grid.appendChild(card);
         });
-      } catch (e) {
-        console.error('Failed to load arcade games:', e);
+
+      } catch (err) {
+        console.error('Failed to load arcade:', err);
+        // Error state (Section 35)
+        grid.innerHTML = '';
+        const errorBox = document.createElement('div');
+        errorBox.className = 'state-box';
+        errorBox.innerHTML = `
+          <h3>Couldn't load the arcade.</h3>
+          <p>Check your connection and try again.</p>
+          <button class="btn btn-secondary btn-sm" onclick="loadArcadeGames()">
+            ${Icons.refresh('icon-sm')} Retry
+          </button>
+        `;
+        grid.appendChild(errorBox);
       }
     }
-    loadGames();
+
+    loadArcadeGames();
   </script>
 </body>
 </html>

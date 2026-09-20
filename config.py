@@ -20,6 +20,18 @@ DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
 BASE_URL = os.getenv("BASE_URL", "https://project.yulya.me").rstrip("/")
 SESSION_SECRET = os.getenv("SESSION_SECRET", "yulya_studio_secret_key_2026_super_secure")
 
+COOKIE_NAME = "yulya_studio_session"
+COOKIE_SECURE = BASE_URL.startswith("https")
+
+# File size limits (Section 31)
+MAX_FILE_SIZE = 512 * 1024       # 512 KB per file
+MAX_PROJECT_SIZE = 2 * 1024 * 1024  # 2 MB total project size
+
+# Rate limits: (max_requests, window_seconds) (Section 30)
+RATE_LIMIT_MODIFY = (10, 60)
+RATE_LIMIT_SAVE_KEY = (5, 60)
+RATE_LIMIT_CREATE = (5, 60)
+
 DISCORD_OAUTH_URL = (
     f"https://discord.com/api/oauth2/authorize?client_id={DISCORD_CLIENT_ID}"
     f"&redirect_uri={BASE_URL}/auth/callback&response_type=code&scope=identify"
