@@ -441,7 +441,6 @@ async def save_project(
         "slug": safe_slug,
         "title": title,
         "description": description or f"A game created by {username} with Yulya Studio.",
-        "files": files or ["index.html", "style.css", "app.js"],
         "tags": tags or ["game", "canvas", "html5"],
         "is_public": is_public,
         "spectator_token": spectator_token,
@@ -475,14 +474,62 @@ async def delete_project(user_id: int, slug: str):
     return res.deleted_count > 0
 
 async def list_community_arcade(limit: int = 50):
-    """Lists recent public projects for the Arcade Gallery."""
-    if projects_col is None:
-        return []
-    cursor = projects_col.find({"is_public": {"$ne": False}}).sort("updated_at", -1).limit(limit)
-    projects = await cursor.to_list(length=limit)
-    for p in projects:
-        p["_id"] = str(p["_id"])
-    return projects
+    """Lists recent public projects for the Arcade Gallery from studio_profiles and projects_col."""
+    games = []
+    seen = set()
+    
+    # 1. Read games from studio_profiles
+    if profiles_col is not None:
+        try:
+            cursor = profiles_col.find({"created_games": {"$exists": True, "$not": {"$size": 0}}}).sort("updated_at", -1).limit(limit)
+            profs = await cursor.to_list(length=limit)
+            for prof in profs:
+                u = prof.get("username") or prof.get("login_id", "creator")
+                for g in prof.get("created_games", []):
+                    s = g.get("slug")
+                    if not s:
+                        continue
+                    key = f"{u}/{s}"
+                    if key not in seen:
+                        seen.add(key)
+                        games.append({
+                            "username": u,
+                            "slug": s,
+                            "title": g.get("title") or s,
+                            "description": g.get("description", ""),
+                            "tags": g.get("tags", ["game", "canvas"]),
+                            "spectator_token": g.get("spectator_token", ""),
+                            "created_at": g.get("created_at", ""),
+                            "updated_at": g.get("updated_at", "")
+                        })
+        except Exception as e:
+            print(f"[COMMUNITY] Profile fetch error: {e}")
+
+    # 2. Fallback to projects_col
+    if len(games) < limit and projects_col is not None:
+        try:
+            cursor = projects_col.find({"is_public": {"$ne": False}}).sort("updated_at", -1).limit(limit)
+            projects = await cursor.to_list(length=limit)
+            for p in projects:
+                u = p.get("username", "creator")
+                s = p.get("slug", "")
+                key = f"{u}/{s}"
+                if key not in seen:
+                    seen.add(key)
+                    games.append({
+                        "username": u,
+                        "slug": s,
+                        "title": p.get("title") or s,
+                        "description": p.get("description", ""),
+                        "tags": p.get("tags", ["game", "canvas"]),
+                        "spectator_token": p.get("spectator_token", ""),
+                        "created_at": str(p.get("created_at", "")),
+                        "updated_at": str(p.get("updated_at", ""))
+                    })
+        except Exception:
+            pass
+
+    return games[:limit]
 
 # --- Studio Signals for Decoupled Bot Communication (Section 108) ---
 

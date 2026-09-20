@@ -259,16 +259,22 @@
       </a>
       <nav class="nav-links">
         <a href="#arcade" style="color: var(--text-primary);">Arcade</a>
-        <a href="/studio">Workspace</a>
+        {% if user %}
+          <a href="/{{ user.username }}">My Profile</a>
+        {% endif %}
       </nav>
     </div>
     <div style="display: flex; align-items: center; gap: var(--space-3);">
       {% if user %}
-        <span class="text-xs text-muted font-mono">@{{ user.username }}</span>
-        <a href="/studio" class="btn btn-primary btn-sm">Launch Studio</a>
+        <a href="/{{ user.username }}" class="btn btn-outline btn-sm" style="display: inline-flex; align-items: center; gap: 6px; text-decoration: none;">
+          {% if user.avatar %}
+            <img src="https://cdn.discordapp.com/avatars/{{ user.id }}/{{ user.avatar }}.png?size=32" style="width: 20px; height: 20px; border-radius: 50%;" alt="{{ user.username }}">
+          {% endif %}
+          <span>@{{ user.username }}</span>
+        </a>
+        <a href="/auth/logout" class="btn btn-secondary btn-sm" style="text-decoration: none;">Log Out</a>
       {% else %}
-        <a href="/auth/login" class="btn btn-secondary btn-sm">Sign In</a>
-        <a href="/studio" class="btn btn-primary btn-sm">Launch Studio</a>
+        <a href="/auth/login" class="btn btn-primary btn-sm" style="text-decoration: none;">Log In with Discord</a>
       {% endif %}
     </div>
   </header>
@@ -284,8 +290,12 @@
         Describe your game idea, and watch complete HTML5 games generate and modify in real time powered by Gemini. Friends can watch live and play instantly.
       </p>
       <div class="hero-actions">
-        <a href="/studio" class="btn btn-primary btn-lg">Start Building</a>
-        <a href="#arcade" class="btn btn-secondary btn-lg">Browse Arcade</a>
+        {% if user %}
+          <a href="/{{ user.username }}" class="btn btn-primary btn-lg" style="text-decoration: none;">My Profile & Projects</a>
+        {% else %}
+          <a href="/auth/login" class="btn btn-primary btn-lg" style="text-decoration: none;">Log In with Discord</a>
+        {% endif %}
+        <a href="#arcade" class="btn btn-secondary btn-lg" style="text-decoration: none;">Browse Arcade</a>
       </div>
     </section>
 
@@ -301,25 +311,46 @@
       </div>
 
       <div class="grid-container" id="gamesGrid">
-        <!-- Skeleton Loaders -->
-        <div class="card" style="height: 340px;">
-          <div class="skeleton" style="height: 190px; margin-bottom: 16px;"></div>
-          <div class="skeleton" style="height: 20px; width: 60%; margin-bottom: 8px;"></div>
-          <div class="skeleton" style="height: 14px; width: 40%; margin-bottom: 16px;"></div>
-          <div class="skeleton" style="height: 32px; width: 100%;"></div>
-        </div>
-        <div class="card" style="height: 340px;">
-          <div class="skeleton" style="height: 190px; margin-bottom: 16px;"></div>
-          <div class="skeleton" style="height: 20px; width: 60%; margin-bottom: 8px;"></div>
-          <div class="skeleton" style="height: 14px; width: 40%; margin-bottom: 16px;"></div>
-          <div class="skeleton" style="height: 32px; width: 100%;"></div>
-        </div>
-        <div class="card" style="height: 340px;">
-          <div class="skeleton" style="height: 190px; margin-bottom: 16px;"></div>
-          <div class="skeleton" style="height: 20px; width: 60%; margin-bottom: 8px;"></div>
-          <div class="skeleton" style="height: 14px; width: 40%; margin-bottom: 16px;"></div>
-          <div class="skeleton" style="height: 32px; width: 100%;"></div>
-        </div>
+        {% if games %}
+          {% for game in games %}
+            <div class="game-card">
+              <div class="card-preview-wrap">
+                <iframe src="/{{ game.username }}/{{ game.slug }}/?embed=1" sandbox="allow-scripts" loading="lazy"></iframe>
+                <div class="card-preview-overlay">
+                  <a href="/{{ game.username }}/{{ game.slug }}/" target="_blank" class="btn btn-primary btn-sm" style="text-decoration: none;">Play Game</a>
+                </div>
+              </div>
+              <div class="card-content">
+                <a href="/{{ game.username }}/{{ game.slug }}/" class="card-title" style="text-decoration: none;">{{ game.title or game.slug }}</a>
+                <div class="card-author">By <a href="/{{ game.username }}" style="color: var(--accent-primary); text-decoration: none;">@{{ game.username }}</a></div>
+                <p class="card-desc">{{ game.description or 'HTML5 Canvas game created with Yulya Studio.' }}</p>
+                <div class="card-tags">
+                  {% for tag in (game.tags or ['canvas', 'game']) %}
+                    <span class="tag-pill">{{ tag }}</span>
+                  {% endfor %}
+                </div>
+                <div class="card-footer">
+                  <a href="/{{ game.username }}/{{ game.slug }}/" target="_blank" class="btn btn-primary btn-sm" style="text-align: center; text-decoration: none;">Play</a>
+                  {% if user and user.username|lower == game.username|lower %}
+                    <a href="/{{ game.username }}/{{ game.slug }}/studio" class="btn btn-outline btn-sm" style="text-align: center; text-decoration: none;">Edit in Studio</a>
+                  {% else %}
+                    <a href="/spectate/{{ game.username }}/{{ game.slug }}" class="btn btn-secondary btn-sm" style="text-align: center; text-decoration: none;">Spectate</a>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          {% endfor %}
+        {% else %}
+          <div class="state-box">
+            <h3>The arcade is quiet.</h3>
+            <p>Be the first creator to build a game with Yulya.</p>
+            {% if user %}
+              <a href="/{{ user.username }}" class="btn btn-primary btn-sm" style="text-decoration: none;">Go to My Profile</a>
+            {% else %}
+              <a href="/auth/login" class="btn btn-primary btn-sm" style="text-decoration: none;">Log In with Discord</a>
+            {% endif %}
+          </div>
+        {% endif %}
       </div>
     </section>
   </main>
@@ -345,7 +376,7 @@
           emptyBox.innerHTML = `
             <h3>The arcade is quiet.</h3>
             <p>Be the first creator to build a game with Yulya.</p>
-            <a href="/studio" class="btn btn-primary btn-sm">Launch Studio</a>
+            <a href="/" class="btn btn-primary btn-sm">Refresh Arcade</a>
           `;
           grid.appendChild(emptyBox);
           return;
@@ -390,9 +421,12 @@
           const author = document.createElement('div');
           author.className = 'card-author';
           author.textContent = 'By ';
-          const authorSpan = document.createElement('span');
-          authorSpan.textContent = `@${game.username}`;
-          author.appendChild(authorSpan);
+          const authorLink = document.createElement('a');
+          authorLink.href = `/${encodeURIComponent(game.username)}`;
+          authorLink.style.color = 'var(--accent-primary)';
+          authorLink.style.textDecoration = 'none';
+          authorLink.textContent = `@${game.username}`;
+          author.appendChild(authorLink);
 
           const desc = document.createElement('p');
           desc.className = 'card-desc';

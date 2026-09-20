@@ -128,12 +128,13 @@ async def security_headers_middleware(request, handler):
 # --- Page Handlers ---
 
 async def handle_index(request: web.Request) -> web.Response:
-    """Public Arcade Gallery Homepage (Section 35)"""
+    """Public Arcade Gallery Homepage"""
     user = await get_session_user(request)
-    return await render_template("index.html", {"user": user})
+    games = await database.list_community_arcade(limit=50)
+    return await render_template("index.html", {"user": user, "games": games})
 
 async def handle_studio(request: web.Request) -> web.Response:
-    """Creator Studio Workspace or Onboarding Setup (Section 36, 37)"""
+    """Creator Studio Workspace or Profile Redirect"""
     user = await get_session_user(request)
     
     if not user:
@@ -145,34 +146,25 @@ async def handle_studio(request: web.Request) -> web.Response:
     if not has_api_key:
         return await render_template("onboarding.html", {"user": user})
         
-    projects = await database.list_user_projects(user["id"])
-    active_slug = request.query.get("slug")
+    slug = request.query.get("slug")
     
-    # Auto-create default starter game "Neon Dodge" if user has no projects (Section 73)
-    if not projects:
-        default_slug = "neon-dodge"
-        projects_manager.create_starter_game(user["id"], user["username"], default_slug, "Neon Dodge")
-        await database.save_project(
-            user_id=user["id"],
-            username=user["username"],
-            slug=default_slug,
-            title="Neon Dodge",
-            description="Starter retro neon dodge game created with Yulya Studio."
-        )
-        projects = await database.list_user_projects(user["id"])
-        active_slug = default_slug
-    elif not active_slug or not any(p["slug"] == active_slug for p in projects):
-        active_slug = projects[0]["slug"]
-        
-    active_project = next((p for p in projects if p["slug"] == active_slug), projects[0])
-    
-    return await render_template("studio.html", {
-        "user": user,
-        "projects": projects,
-        "active_slug": active_slug,
-        "active_project": active_project,
-        "spectator_token": active_project.get("spectator_token", "")
-    })
+    # If a specific project slug is requested:
+    if slug:
+        proj = await database.get_project(user["id"], slug)
+        if not proj:
+            proj = await database.get_project_by_username_and_slug(user["username"], slug)
+        if proj:
+            projects = await database.list_user_projects(user["id"])
+            return await render_template("studio.html", {
+                "user": user,
+                "projects": projects,
+                "active_slug": slug,
+                "active_project": proj,
+                "spectator_token": proj.get("spectator_token", "")
+            })
+            
+    # Never auto-create games! Cleanly redirect to the user's profile where they can browse and click "+ New Project"
+    return web.HTTPFound(f"/{user['username']}")
 
 async def handle_spectate(request: web.Request) -> web.Response:
     """
