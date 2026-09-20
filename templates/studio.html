@@ -827,26 +827,30 @@
     const ACTIVE_SLUG = "{{ active_slug }}";
     const SPECTATOR_TOKEN = "{{ spectator_token }}";
 
-    // Populate Icons
-    document.getElementById('folderIcon').innerHTML = Icons.file('icon-sm');
-    document.getElementById('shareIcon').innerHTML = Icons.share('icon-sm');
-    document.getElementById('downloadIcon').innerHTML = Icons.download('icon-sm');
-    document.getElementById('logoutIcon').innerHTML = Icons.logout('icon-sm');
-    document.getElementById('terminalTabIcon').innerHTML = Icons.terminal('icon-sm');
-    document.getElementById('refreshIcon').innerHTML = Icons.refresh('icon-sm');
-    document.getElementById('screenIcon').innerHTML = Icons.screen('icon-sm');
-    document.getElementById('externalIcon').innerHTML = Icons.external('icon-sm');
-    document.getElementById('maxIcon').innerHTML = Icons.maximize('icon-sm');
-    document.getElementById('micIcon').innerHTML = Icons.mic('icon');
-    document.getElementById('sendIcon').innerHTML = Icons.send('icon-sm');
-    document.getElementById('copyIcon').innerHTML = Icons.copy('icon-sm');
-    document.getElementById('closeProjIcon').innerHTML = Icons.x('icon-sm');
-    document.getElementById('closeNewProjIcon').innerHTML = Icons.x('icon-sm');
-    document.getElementById('closeDelIcon').innerHTML = Icons.x('icon-sm');
-    document.getElementById('closeLeaveIcon').innerHTML = Icons.x('icon-sm');
-    document.getElementById('liveIcon').innerHTML = Icons.play('icon-sm');
-    const palIcon = document.getElementById('paletteSearchIcon');
-    if (palIcon) palIcon.innerHTML = Icons.terminal('icon-sm');
+    // Populate Icons defensively
+    function safeSetIcon(id, html) {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = html;
+    }
+
+    safeSetIcon('folderIcon', Icons.file('icon-sm'));
+    safeSetIcon('shareIcon', Icons.share('icon-sm'));
+    safeSetIcon('downloadIcon', Icons.download('icon-sm'));
+    safeSetIcon('logoutIcon', Icons.logout('icon-sm'));
+    safeSetIcon('terminalTabIcon', Icons.terminal('icon-sm'));
+    safeSetIcon('refreshIcon', Icons.refresh('icon-sm'));
+    safeSetIcon('screenIcon', Icons.screen('icon-sm'));
+    safeSetIcon('externalIcon', Icons.external('icon-sm'));
+    safeSetIcon('maxIcon', Icons.maximize('icon-sm'));
+    safeSetIcon('micIcon', Icons.mic('icon'));
+    safeSetIcon('sendIcon', Icons.send('icon-sm'));
+    safeSetIcon('copyIcon', Icons.copy('icon-sm'));
+    safeSetIcon('closeProjIcon', Icons.x('icon-sm'));
+    safeSetIcon('closeNewProjIcon', Icons.x('icon-sm'));
+    safeSetIcon('closeDelIcon', Icons.x('icon-sm'));
+    safeSetIcon('closeLeaveIcon', Icons.x('icon-sm'));
+    safeSetIcon('liveIcon', Icons.play('icon-sm'));
+    safeSetIcon('paletteSearchIcon', Icons.terminal('icon-sm'));
 
     // Studio State
     let activeTab = 'terminal';
@@ -1065,10 +1069,8 @@
       const disp = document.getElementById('codeDisplay');
       disp.textContent = code;
 
-      const linesCount = code.split('
-').length;
-      const lines = Array.from({ length: linesCount }, (_, i) => i + 1).join('
-');
+      const linesCount = code.split('\n').length;
+      const lines = Array.from({ length: linesCount }, (_, i) => i + 1).join('\n');
       document.getElementById('lineNumbers').textContent = lines;
     }
 
