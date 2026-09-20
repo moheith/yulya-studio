@@ -82,10 +82,20 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
             client = genai.Client(api_key=cleaned_key)
             last_err = None
             # Multi-model waterfall to absorb free-tier 20 RPD caps:
-            # 1. gemini-3.6-flash (20 RPD) -> primary
-            # 2. gemini-3.8-flash (20 RPD) -> fallback 1
-            # 3. gemini-3.1-flash-lite (500 RPD) -> high-capacity fallback 2
-            for model_name in ["gemini-3.6-flash", "gemini-3.8-flash", "gemini-3.1-flash-lite"]:
+            # 1. gemini-3.8-flash (20 RPD) -> primary
+            # 2. gemini-3.7-flash (20 RPD) -> fallback 1
+            # 3. gemini-3.6-flash (20 RPD) -> fallback 2
+            # 4. gemini-3.5-flash (20 RPD) -> fallback 3
+            # 5. gemini-3.5-flash-lite (500 RPD) -> fallback 4
+            # 6. gemini-3.1-flash-lite (500 RPD) -> fallback 5
+            for model_name in [
+                "gemini-3.8-flash",
+                "gemini-3.7-flash",
+                "gemini-3.6-flash",
+                "gemini-3.5-flash",
+                "gemini-3.5-flash-lite",
+                "gemini-3.1-flash-lite"
+            ]:
                 try:
                     response = client.models.generate_content(
                         model=model_name,
