@@ -390,6 +390,23 @@ async def api_modify_project(request: web.Request) -> web.Response:
                 "content": result["content"],
                 "timestamp": int(time.time())
             })
+            for live_ws, live_info in list(ACTIVE_LIVE_SESSIONS.items()):
+                if live_info.get("slug") == slug and not live_ws.closed:
+                    try:
+                        s = live_info.get("session")
+                        if s:
+                            await s.send(
+                                input=(
+                                    f"[System: Antigravity has completed compiling the game: '{result['summary']}'. "
+                                    "The game is now running in the preview iframe on screen! "
+                                    "Tell the creator that their build is complete! Invite them to test playing it, "
+                                    "and remind them they can click the Screenshare button so you can watch them play live, "
+                                    "see how the game feels, and brainstorm next improvements together.]"
+                                ),
+                                end_of_turn=True
+                            )
+                    except Exception:
+                        pass
             
         return web.json_response(result)
     except Exception as e:
@@ -737,29 +754,88 @@ async def start_gemini_live_session(ws: web.WebSocketResponse, slug: str, sessio
         style_css = projects_manager.read_project_file(user_id, slug, "style.css")
         app_js = projects_manager.read_project_file(user_id, slug, "app.js")
 
-        live_sys_prompt = f"""You are Gemini 3.8 Live Extended Thinking on High, an interactive AI game designer and software architect assisting the creator inside Yulya Studio.
-Your thinking mode is set to Extended Thinking on High. Thoroughly analyze and reason about game mechanics, loops, physics, canvas rendering, and user experience.
-The creator is currently building an HTML5 Canvas web game named '{slug}'.
-You can hear the user's voice and speak directly back to them in real time with high-quality voice audio.
-You can see the game screen/canvas when the user shares their screen.
-You have a tool called `modify_game_code(instruction: str)`.
-Whenever the user asks you to build, modify, add features, adjust physics/graphics, or fix bugs in the game, call `modify_game_code` with the exact instruction.
-Keep your spoken voice responses concise, conversational, energetic, and natural.
+        live_sys_prompt = f"""You are Gemini 3.8 Live Extended Thinking on High, an interactive AI Game Architect and Pair-Programming Co-pilot inside Yulya Studio.
+Your thinking mode is set to Extended Thinking on High. You are having an ongoing real-time voice call with the creator @{session_user.get('username', 'creator')} building an HTML5 Canvas web game named '{slug}'.
+
+WORKFLOW & DESIGN GUIDELINES:
+
+1. THE "GRILL ME" INTERACTIVE DESIGN INTERVIEW:
+- When the creator describes an idea, DO NOT build immediately.
+- "Grill" the creator with smart, creative, and specific questions to thoroughly flesh out the game.
+- Ask about:
+  * Core gameplay mechanics, win/loss rules, and scoring
+  * Art style and visual aesthetic (always provide 2-3 clear options to choose from, e.g. Neon Cyberpunk vs Retro 8-bit Pixel vs Minimalist Pastel)
+  * Control scheme (e.g. Arrow keys, WASD, Mouse aim, Mobile touch)
+  * Enemy types, difficulty progression, hazards, and power-ups
+- Ask 1 or 2 focused questions at a time with concrete options so the creator can easily reply.
+- Dig into the details until you have a complete, polished game plan.
+
+2. DRAFTING THE PROMPT & ASKING PERMISSION (MANDATORY BEFORE BUILDING):
+- When you and the creator have fleshed out the entire idea and are ready to build:
+  * Ask the creator if they would like you to draft the build prompt for Antigravity.
+  * Call your tool `draft_prompt_to_input(prompt=...)` with the comprehensive, detailed engineering specification you designed.
+  * Tell the creator: "I've drafted the complete build prompt in your command box at the bottom of the screen! You can review it, edit it if you want, and press Enter to send it — or just say 'send it' and I'll send it directly to Antigravity for you."
+  * If the creator asks "Can you read the prompt to me?", read the full prompt aloud in your voice and ask for their confirmation!
+
+3. SENDING TO ANTIGRAVITY CODING ENGINE:
+- When the creator confirms verbally ("send it", "just send it", "go ahead and build", "yes build it"):
+  * Call your tool `send_prompt_to_antigravity(instruction=...)`.
+  * Tell the creator you sent it to Antigravity and it's compiling now!
+- (Note: The creator may also press Enter on the command box themselves to launch it.)
+
+4. CHATTING WHILE BUILDING (NON-BLOCKING):
+- While Antigravity is compiling code in the background, you and the creator can continue talking freely!
+- Brainstorm extra features, power-ups, audio ideas, visual effects, or future ideas to add once the build finishes.
+
+5. TESTING, SCREENSHARING & ITERATIVE POLISH:
+- When Antigravity completes the build, you will receive a notification.
+- Congratulate the creator and invite them to test playing the game right in the live preview window!
+- Encourage them to click the "Screenshare" button so you can watch their screen live.
+- When they screenshare and play, observe their canvas, critique how it feels and looks, and discuss improvements.
+- When they want to add new features or fixes, repeat the process: draft the new prompt into their input box with `draft_prompt_to_input`, ask permission, and build!
+
+TOOLS:
+- `draft_prompt_to_input(prompt: str)`: Populates the creator's on-screen input box with the drafted Antigravity build prompt.
+- `send_prompt_to_antigravity(instruction: str)`: Hands off the approved instruction to Antigravity to build/compile the game.
+
+Keep your spoken voice responses conversational, energetic, clear, and natural. Keep spoken sentences punchy and engaging.
 
 Current Game Repository Files:
 --- index.html ---
-{index_html[:8000]}
+{index_html[:6000]}
 --- style.css ---
-{style_css[:8000]}
+{style_css[:4000]}
 --- app.js ---
-{app_js[:12000]}
+{app_js[:8000]}
 """
 
-        modify_tool = types.Tool(
+        architect_tools = types.Tool(
             function_declarations=[
                 types.FunctionDeclaration(
+                    name="draft_prompt_to_input",
+                    description="Populates the drafted Antigravity engineering prompt into the creator's on-screen command input text box for review and editing before sending.",
+                    parameters=types.Schema(
+                        type="OBJECT",
+                        properties={
+                            "prompt": types.Schema(type="STRING", description="The complete, detailed engineering specification prompt for Antigravity.")
+                        },
+                        required=["prompt"]
+                    )
+                ),
+                types.FunctionDeclaration(
+                    name="send_prompt_to_antigravity",
+                    description="Sends the approved build instruction to the Antigravity Coding Engine to compile and update the game files.",
+                    parameters=types.Schema(
+                        type="OBJECT",
+                        properties={
+                            "instruction": types.Schema(type="STRING", description="Detailed code modification instruction to build.")
+                        },
+                        required=["instruction"]
+                    )
+                ),
+                types.FunctionDeclaration(
                     name="modify_game_code",
-                    description="Modifies or builds HTML5 Canvas game files based on user instruction.",
+                    description="Builds or modifies HTML5 Canvas game files with Antigravity.",
                     parameters=types.Schema(
                         type="OBJECT",
                         properties={
@@ -780,7 +856,7 @@ Current Game Repository Files:
             config={
                 "response_modalities": ["AUDIO"],
                 "system_instruction": types.Content(parts=[types.Part.from_text(text=live_sys_prompt)]),
-                "tools": [modify_tool],
+                "tools": [architect_tools],
                 "generation_config": {
                     "thinking_config": {
                         "include_thoughts": True
@@ -807,6 +883,21 @@ Current Game Repository Files:
                 "model": connected_model
             })
         await broadcast_project_log(slug, f"[LIVE] Connected to {connected_model}", "live")
+
+        # Greet user first and start the 'grill-me' project interview immediately
+        try:
+            creator_name = session_user.get("username", "creator")
+            await session.send(
+                input=(
+                    f"The creator @{creator_name} has just joined the call for the HTML5 Canvas project '{slug}'. "
+                    "Speak immediately right now in voice: Greet @{creator_name} warmly and with high energy! "
+                    "Introduce yourself as their AI Game Architect & pair-programming co-pilot in Yulya Studio. "
+                    "Ask them what game or project idea they want to create today, and begin the design interview to help them plan and architect it!"
+                ),
+                end_of_turn=True
+            )
+        except Exception as greet_err:
+            print(f"[LIVE GREET ERROR] {greet_err}")
 
     except Exception as e:
         print(f"[LIVE ERROR] start_gemini_live_session: {e}")
@@ -845,9 +936,33 @@ async def _run_antigravity_builder(slug: str, session_user: dict, api_key: str, 
                 "timestamp": int(time.time())
             })
             await broadcast_project_log(slug, f"[PASS] {res['summary']}", "pass")
+
+            # Notify Gemini Live voice session that build is complete and ready for playtesting / screenshare
+            if session and not ws.closed and ws in ACTIVE_LIVE_SESSIONS:
+                try:
+                    await session.send(
+                        input=(
+                            f"[System: Antigravity has completed compiling the game: '{res['summary']}'. "
+                            "The game is now running in the preview iframe on screen! "
+                            "Tell the creator that the build finished successfully! Invite them to test playing it right now in the preview, "
+                            "and remind them they can click the Screenshare button so you can watch them play live, "
+                            "see how the game feels, and brainstorm next improvements together.]"
+                        ),
+                        end_of_turn=True
+                    )
+                except Exception as notify_err:
+                    print(f"[LIVE POST-BUILD NOTIFY ERROR] {notify_err}")
         else:
             err_msg = res.get("error", "Code build failed")
             await broadcast_project_log(slug, f"[FAIL] Antigravity build failed: {err_msg}", "fail")
+            if session and not ws.closed and ws in ACTIVE_LIVE_SESSIONS:
+                try:
+                    await session.send(
+                        input=f"[System: Antigravity build failed: {err_msg}. Inform the creator and discuss how to adjust the plan.]",
+                        end_of_turn=True
+                    )
+                except Exception:
+                    pass
     except Exception as e:
         print(f"[ANTIGRAVITY BUILDER ERROR] {e}")
         await broadcast_project_log(slug, f"[FAIL] Antigravity error: {e}", "fail")
@@ -909,24 +1024,55 @@ async def _live_receive_loop(ws: web.WebSocketResponse, slug: str, session, api_
                             if not ws.closed:
                                 await ws.send_json({"type": "ai_interrupted"})
 
-                    # Handle tool calls (Architect invoking Tier 2 Antigravity Waterfall Builder)
+                    # Handle tool calls (Architect invoking Antigravity tools)
                     tool_call = response.tool_call
                     if tool_call and tool_call.function_calls:
                         for fc in tool_call.function_calls:
-                            if fc.name == "modify_game_code":
+                            if fc.name == "draft_prompt_to_input":
+                                drafted_prompt = fc.args.get("prompt", "").strip()
+                                await broadcast_project_log(slug, f"[ARCHITECT] Drafted prompt to command box: \"{drafted_prompt[:80]}...\"", "info")
+                                if not ws.closed:
+                                    await ws.send_json({
+                                        "type": "set_command_input",
+                                        "text": drafted_prompt
+                                    })
+
+                                tool_resp = types.LiveClientToolResponse(
+                                    function_responses=[
+                                        types.FunctionResponse(
+                                            name="draft_prompt_to_input",
+                                            id=fc.id,
+                                            response={
+                                                "result": (
+                                                    "The prompt has been placed into the creator's command input box on screen. "
+                                                    "Tell the creator you have placed the prompt into their input box at the bottom of the screen. "
+                                                    "Let them know they can review it, edit it, and press Enter to send it — or they can just say 'send it' and you will send it to Antigravity. "
+                                                    "Also offer to read the prompt aloud if they want you to read it."
+                                                )
+                                            }
+                                        )
+                                    ]
+                                )
+                                try:
+                                    await session.send(input=tool_resp)
+                                except Exception as e:
+                                    print(f"[LIVE TOOL SEND ERROR] {e}")
+
+                            elif fc.name in ("send_prompt_to_antigravity", "modify_game_code"):
                                 instruction = fc.args.get("instruction", "").strip()
-                                await broadcast_project_log(slug, f"[ARCHITECT] Gemini Live invoked builder: \"{instruction}\"", "info")
+                                await broadcast_project_log(slug, f"[ARCHITECT] Antigravity build started: \"{instruction[:80]}...\"", "info")
                                 if not ws.closed:
                                     await ws.send_json({"type": "show_loader", "text": f"Antigravity is coding: {instruction[:60]}..."})
+                                    await ws.send_json({"type": "set_command_input", "text": ""})
 
                                 # Send immediate tool response so Gemini Live voice loop stays unblocked
                                 tool_resp = types.LiveClientToolResponse(
                                     function_responses=[
                                         types.FunctionResponse(
-                                            name="modify_game_code",
+                                            name=fc.name,
                                             id=fc.id,
                                             response={
-                                                "result": f"Antigravity engine has received prompt: '{instruction}' and is now compiling the game files in the background. Tell the user you started building it, and continue talking with them about gameplay mechanics, graphics, or further ideas while it builds."
+                                                "result": f"Antigravity engine has received prompt: '{instruction}' and is now compiling the game files in the background. Tell the creator you started building it, and continue talking with them about gameplay mechanics, graphics, or further ideas while it builds."
                                             }
                                         )
                                     ]
@@ -1127,19 +1273,18 @@ async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
                             profile = await database.get_user_profile(session_user["id"])
                             api_key = profile.get("studio_api_key") if profile else None
                             if api_key:
-                                async def _ws_log_callback(step_type, message_text):
-                                    await broadcast_project_log(slug, message_text, step_type)
-                                    
-                                res = await ai_engine.process_code_request(
-                                    api_key, session_user["id"], session_user["username"], slug, prompt, log_callback=_ws_log_callback
-                                )
-                                if res.get("success"):
-                                    await broadcast_project_update(slug, {
-                                        "type": "code_update",
-                                        "summary": res["summary"],
-                                        "content": res["content"],
-                                        "timestamp": int(time.time())
-                                    })
+                                if not ws.closed:
+                                    await ws.send_json({"type": "set_command_input", "text": ""})
+                                live_sess = ACTIVE_LIVE_SESSIONS.get(ws, {}).get("session")
+                                if live_sess:
+                                    try:
+                                        await live_sess.send(
+                                            input=f"[System: The creator submitted the prompt to Antigravity: '{prompt}'. Tell the creator you see they launched the build and Antigravity is coding now! Keep chatting with them while it compiles.]",
+                                            end_of_turn=True
+                                        )
+                                    except Exception:
+                                        pass
+                                asyncio.create_task(_run_antigravity_builder(slug, session_user, api_key, prompt, ws, live_sess))
                                     
                     elif msg_type == "video_frame":
                         # Only creator can stream screen frames (Section 21, 81)

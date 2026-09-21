@@ -491,6 +491,24 @@
       box-shadow: 0 0 0 1px var(--accent-primary);
     }
 
+    .command-input-wrap.input-highlight {
+      border-color: var(--accent-primary);
+      box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.4), 0 0 16px rgba(56, 189, 248, 0.25);
+      animation: draftPulse 2s ease-out;
+    }
+
+    @keyframes draftPulse {
+      0% {
+        box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.6), 0 0 24px rgba(56, 189, 248, 0.4);
+      }
+      50% {
+        box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.4), 0 0 16px rgba(56, 189, 248, 0.25);
+      }
+      100% {
+        box-shadow: none;
+      }
+    }
+
     .command-input-wrap input {
       flex: 1;
       background: transparent;
@@ -1257,6 +1275,22 @@
               showTerminalLoader(data.text || 'Antigravity is coding your game...');
             } else if (data.type === 'hide_loader') {
               hideTerminalLoader();
+            } else if (data.type === 'set_command_input') {
+              const input = document.getElementById('commandInput');
+              const wrap = document.querySelector('.command-input-wrap');
+              if (input) {
+                input.value = data.text || '';
+                if (data.text) {
+                  input.focus();
+                  if (wrap) {
+                    wrap.classList.remove('input-highlight');
+                    void wrap.offsetWidth;
+                    wrap.classList.add('input-highlight');
+                  }
+                  logTerminal(`[ARCHITECT_DRAFT] Prompt placed in command box: "${data.text}"`, 'info');
+                  ToastManager.show('Prompt drafted in command box. Review & press Enter, or say "send it"!', 'info');
+                }
+              }
             } else if (data.type === 'ai_audio') {
               // Play Gemini Live streaming voice through browser speakers
               setLiveStatus('Gemini 3.8 Live Speaking...', 'speaking');
