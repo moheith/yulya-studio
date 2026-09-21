@@ -318,6 +318,12 @@
     .log-badge.user { color: #f1f5f9; font-weight: 700; }
     .log-badge.live { color: #a855f7; font-weight: 700; }
     .log-badge.architect { color: #2dd4bf; font-weight: 700; }
+    .log-badge.diff { color: #a3e635; font-weight: 700; }
+    .log-badge.verify { color: #38bdf8; font-weight: 700; }
+    .log-badge.live_error { color: #f43f5e; font-weight: 700; }
+    .log-badge.ai { color: #c084fc; font-weight: 700; }
+    .log-badge.resume { color: #34d399; font-weight: 700; }
+    .log-badge.exit { color: #94a3b8; font-weight: 700; }
 
     .log-msg { color: var(--text-primary); word-break: break-word; font-family: var(--font-code); }
 
@@ -930,6 +936,7 @@
         this.gainNode = null;
         this.nextStartTime = 0;
         this._speakingTimeout = null;
+        this.activeSources = new Set();
       }
 
       init() {
@@ -976,12 +983,21 @@
           source.start(this.nextStartTime);
           this.nextStartTime += audioBuffer.duration;
 
+          this.activeSources.add(source);
+          source.onended = () => {
+            this.activeSources.delete(source);
+          };
+
+          // Mark AI as actively speaking to prevent echo loopback
+          isSpeaking = true;
+
           // Animate speaking waveform
           animateWaveform('speaking');
           clearTimeout(this._speakingTimeout);
           this._speakingTimeout = setTimeout(() => {
             if (this.audioCtx && this.audioCtx.currentTime >= this.nextStartTime) {
               stopWaveform();
+              isSpeaking = false;
             }
           }, (this.nextStartTime - curTime) * 1000 + 100);
 
@@ -991,13 +1007,23 @@
       }
 
       stop() {
+        for (const src of this.activeSources) {
+          try { src.stop(); src.disconnect(); } catch (e) {}
+        }
+        this.activeSources.clear();
+        this.nextStartTime = 0;
+        isSpeaking = false;
+        clearTimeout(this._speakingTimeout);
+        stopWaveform();
+      }
+
+      destroy() {
+        this.stop();
         if (this.audioCtx) {
           try { this.audioCtx.close(); } catch (e) {}
           this.audioCtx = null;
           this.gainNode = null;
-          this.nextStartTime = 0;
         }
-        stopWaveform();
       }
     }
 
@@ -1356,15 +1382,14 @@
         logTerminal('[LIVE] Connecting to Gemini 3.8 Live Extended Thinking (High)...', 'thinking');
         ws.send(JSON.stringify({ type: 'connect_live' }));
         liveAudioPlayer.init();
-        if (voiceMode === 'continuous') {
-          startMicrophone().then(ok => {
-            if (ok) {
-              isListening = true;
-              setLiveStatus('Continuous Voice Active', 'listening');
-              animateWaveform('listening');
-            }
-          });
-        }
+        // Pre-warm microphone immediately so permissions and audio pipeline are ready with zero lag
+        startMicrophone().then(ok => {
+          if (ok && voiceMode === 'continuous') {
+            isListening = true;
+            setLiveStatus('Continuous Voice Active', 'listening');
+            animateWaveform('listening');
+          }
+        });
       }
     }
 
@@ -1420,8 +1445,20 @@
         micProcessor = micAudioContext.createScriptProcessor(4096, 1, 1);
 
         micProcessor.onaudioprocess = (e) => {
-          if (!isListening && voiceMode !== 'continuous') return;
+          if (!isListening && (voiceMode !== 'continuous' || isSpeaking)) return;
+          if (!isLiveConnected || !ws || ws.readyState !== WebSocket.OPEN) return;
+
           const inputData = e.inputBuffer.getChannelData(0);
+
+          // Real-time audio volume RMS calculation for visualizer
+          let sum = 0;
+          for (let i = 0; i < inputData.length; i++) {
+            sum += inputData[i] * inputData[i];
+          }
+          const rms = Math.sqrt(sum / inputData.length);
+          if (rms > 0.01) {
+            animateWaveform('listening');
+          }
 
           // Downsample from hardware sample rate to 16kHz
           const downsampled = downsampleTo16kHz(inputData, micAudioContext.sampleRate);
@@ -1442,9 +1479,7 @@
           }
           const base64Data = window.btoa(binary);
 
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'audio_chunk', pcm: base64Data }));
-          }
+          ws.send(JSON.stringify({ type: 'audio_chunk', pcm: base64Data }));
         };
 
         // Mute node prevents microphone loopback through speakers
@@ -1474,6 +1509,7 @@
         micStream.getTracks().forEach(t => t.stop());
         micStream = null;
       }
+      isListening = false;
       stopWaveform();
     }
 
@@ -1496,7 +1532,7 @@
       } else {
         pttBtn.style.display = 'flex';
         isListening = false;
-        stopMicrophone();
+        stopWaveform();
         if (isLiveConnected) setLiveStatus('Live Ready (Hold Space to Talk)', 'online');
       }
     }
@@ -1507,18 +1543,21 @@
 
     async function activatePTT() {
       if (isPTTActive) return;
+
+      if (!isLiveConnected) {
+        ToastManager.show('Connecting Live AI first... please hold on', 'info');
+        toggleLiveAI();
+        return;
+      }
+
       isPTTActive = true;
       pttBtn.classList.add('recording');
       document.getElementById('pttLabel').textContent = 'Listening... (Release)';
 
       liveAudioPlayer.init();
 
-      if (!isLiveConnected) {
-        toggleLiveAI();
-      }
-
       const ok = await startMicrophone();
-      if (ok) {
+      if (ok && isPTTActive) {
         isListening = true;
         setLiveStatus('Listening to you...', 'listening');
         animateWaveform('listening');
@@ -1890,7 +1929,7 @@
           ws.close();
         } catch (e) {}
       }
-      if (liveAudioPlayer) liveAudioPlayer.stop();
+      if (liveAudioPlayer) liveAudioPlayer.destroy();
       stopMicrophone();
       if (screenStream) {
         screenStream.getTracks().forEach(t => t.stop());

@@ -819,99 +819,111 @@ Current Game Repository Files:
         await broadcast_project_log(slug, f"[LIVE_ERROR] {err_msg[:140]}", "error")
 
 async def _live_receive_loop(ws: web.WebSocketResponse, slug: str, session, api_key: str, session_user: dict):
-    """Background listener for streaming audio, thoughts, and tool calls from Gemini Live."""
+    """Background listener for streaming audio, thoughts, and tool calls from Gemini Live across all turns."""
     try:
-        async for response in session.receive():
-            if ws.closed:
-                break
-                
-            server_content = response.server_content
-            if server_content:
-                model_turn = server_content.model_turn
-                if model_turn:
-                    for part in model_turn.parts:
-                        # PCM Audio response (24kHz little-endian)
-                        if part.inline_data and part.inline_data.data:
-                            raw_data = part.inline_data.data
-                            if isinstance(raw_data, bytes):
-                                audio_b64 = base64.b64encode(raw_data).decode("ascii")
-                            elif isinstance(raw_data, str):
-                                try:
-                                    base64.b64decode(raw_data)
-                                    audio_b64 = raw_data
-                                except Exception:
-                                    audio_b64 = base64.b64encode(raw_data.encode("utf-8")).decode("ascii")
-                            else:
-                                audio_b64 = ""
-                            if audio_b64 and not ws.closed:
-                                await ws.send_json({
-                                    "type": "ai_audio",
-                                    "pcm": audio_b64,
-                                    "rate": 24000
-                                })
-                        # Extended Thinking thoughts
-                        if getattr(part, "thought", None):
-                            thought_text = str(part.thought).strip()
-                            if thought_text:
-                                await broadcast_project_log(slug, f"[THINKING] {thought_text}", "thinking")
-                        if part.text:
+        while not ws.closed and ws in ACTIVE_LIVE_SESSIONS:
+            try:
+                async for response in session.receive():
+                    if ws.closed or ws not in ACTIVE_LIVE_SESSIONS:
+                        break
+                        
+                    server_content = response.server_content
+                    if server_content:
+                        model_turn = server_content.model_turn
+                        if model_turn:
+                            for part in model_turn.parts:
+                                # PCM Audio response (24kHz little-endian)
+                                if part.inline_data and part.inline_data.data:
+                                    raw_data = part.inline_data.data
+                                    if isinstance(raw_data, bytes):
+                                        audio_b64 = base64.b64encode(raw_data).decode("ascii")
+                                    elif isinstance(raw_data, str):
+                                        try:
+                                            base64.b64decode(raw_data)
+                                            audio_b64 = raw_data
+                                        except Exception:
+                                            audio_b64 = base64.b64encode(raw_data.encode("utf-8")).decode("ascii")
+                                    else:
+                                        audio_b64 = ""
+                                    if audio_b64 and not ws.closed:
+                                        await ws.send_json({
+                                            "type": "ai_audio",
+                                            "pcm": audio_b64,
+                                            "rate": 24000
+                                        })
+                                # Extended Thinking thoughts
+                                if getattr(part, "thought", None):
+                                    thought_text = str(part.thought).strip()
+                                    if thought_text:
+                                        await broadcast_project_log(slug, f"[THINKING] {thought_text}", "thinking")
+                                if part.text:
+                                    if not ws.closed:
+                                        await ws.send_json({
+                                            "type": "ai_text",
+                                            "text": part.text
+                                        })
+                                        
+                        if server_content.turn_complete:
                             if not ws.closed:
-                                await ws.send_json({
-                                    "type": "ai_text",
-                                    "text": part.text
-                                })
-                                
-                if server_content.turn_complete:
-                    if not ws.closed:
-                        await ws.send_json({"type": "ai_turn_complete"})
-                if getattr(server_content, "interrupted", False):
-                    if not ws.closed:
-                        await ws.send_json({"type": "ai_interrupted"})
+                                await ws.send_json({"type": "ai_turn_complete"})
+                        if getattr(server_content, "interrupted", False):
+                            if not ws.closed:
+                                await ws.send_json({"type": "ai_interrupted"})
 
-            # Handle tool calls (Architect invoking Tier 2 Antigravity Waterfall Builder)
-            tool_call = response.tool_call
-            if tool_call and tool_call.function_calls:
-                for fc in tool_call.function_calls:
-                    if fc.name == "modify_game_code":
-                        instruction = fc.args.get("instruction", "").strip()
-                        await broadcast_project_log(slug, f"[ARCHITECT] Gemini Live invoked builder: \"{instruction}\"", "info")
-                        if not ws.closed:
-                            await ws.send_json({"type": "live_status", "status": "thinking"})
+                    # Handle tool calls (Architect invoking Tier 2 Antigravity Waterfall Builder)
+                    tool_call = response.tool_call
+                    if tool_call and tool_call.function_calls:
+                        for fc in tool_call.function_calls:
+                            if fc.name == "modify_game_code":
+                                instruction = fc.args.get("instruction", "").strip()
+                                await broadcast_project_log(slug, f"[ARCHITECT] Gemini Live invoked builder: \"{instruction}\"", "info")
+                                if not ws.closed:
+                                    await ws.send_json({"type": "live_status", "status": "thinking"})
 
-                        async def _cb(step_type, msg_text):
-                            await broadcast_project_log(slug, msg_text, step_type)
+                                async def _cb(step_type, msg_text):
+                                    await broadcast_project_log(slug, msg_text, step_type)
 
-                        res = await ai_engine.process_code_request(
-                            api_key, session_user["id"], session_user["username"], slug, instruction, log_callback=_cb
-                        )
-
-                        tool_resp = types.LiveClientToolResponse(
-                            function_responses=[
-                                types.FunctionResponse(
-                                    name="modify_game_code",
-                                    id=fc.id,
-                                    response={"result": "Game files updated successfully" if res.get("success") else res.get("error", "Failed to update")}
+                                res = await ai_engine.process_code_request(
+                                    api_key, session_user["id"], session_user["username"], slug, instruction, log_callback=_cb
                                 )
-                            ]
-                        )
-                        try:
-                            await session.send(input=tool_resp)
-                        except Exception:
-                            pass
 
-                        if res.get("success"):
-                            await broadcast_project_update(slug, {
-                                "type": "code_update",
-                                "summary": res["summary"],
-                                "content": res["content"],
-                                "timestamp": int(time.time())
-                            })
-                        if not ws.closed:
-                            await ws.send_json({"type": "live_status", "status": "connected"})
+                                tool_resp = types.LiveClientToolResponse(
+                                    function_responses=[
+                                        types.FunctionResponse(
+                                            name="modify_game_code",
+                                            id=fc.id,
+                                            response={"result": "Game files updated successfully" if res.get("success") else res.get("error", "Failed to update")}
+                                        )
+                                    ]
+                                )
+                                try:
+                                    await session.send(input=tool_resp)
+                                except Exception as e:
+                                    print(f"[LIVE TOOL SEND ERROR] {e}")
+
+                                if res.get("success"):
+                                    await broadcast_project_update(slug, {
+                                        "type": "code_update",
+                                        "summary": res["summary"],
+                                        "content": res["content"],
+                                        "timestamp": int(time.time())
+                                    })
+                                if not ws.closed:
+                                    await ws.send_json({"type": "live_status", "status": "connected"})
+            except asyncio.CancelledError:
+                break
+            except Exception as turn_err:
+                print(f"[LIVE RECEIVE TURN ERROR] {turn_err}")
+                if ws.closed or ws not in ACTIVE_LIVE_SESSIONS:
+                    break
+                err_str = str(turn_err).lower()
+                if "connection closed" in err_str or "closed" in err_str or "1000" in err_str or "1006" in err_str:
+                    break
+                await asyncio.sleep(0.05)
     except asyncio.CancelledError:
         pass
     except Exception as e:
-        print(f"[LIVE RECEIVE ERROR] {e}")
+        print(f"[LIVE RECEIVE FATAL ERROR] {e}")
 
 async def stop_gemini_live_session(ws: web.WebSocketResponse):
     """Gracefully terminates an active Gemini Live session."""
