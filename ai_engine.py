@@ -178,10 +178,10 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
             raise RuntimeError("All models in the generation waterfall failed.")
             
         try:
-            # 10,000 second timeout on AI code generation allowing deep reasoning & debugging
-            raw_response = await asyncio.wait_for(asyncio.to_thread(_call_gemini), timeout=10000.0)
+            # 3000 second timeout on AI code generation allowing deep reasoning & debugging
+            raw_response = await asyncio.wait_for(asyncio.to_thread(_call_gemini), timeout=3000.0)
         except asyncio.TimeoutError:
-            err_msg = "Google AI Studio request timed out after 10000 seconds."
+            err_msg = "Google AI Studio request timed out after 3000 seconds."
             fail_step = f"[FAIL] {err_msg}"
             projects_manager.write_build_log(user_id_int, safe_slug, "FAIL", fail_step)
             if log_callback:

@@ -584,13 +584,14 @@
 
     /* Bottom Command & Multimodal Bar */
     .bottom-command-bar {
-      height: 64px;
+      height: 54px;
       border-top: 1px solid var(--border-subtle);
       background-color: var(--bg-overlay);
       display: flex;
       align-items: center;
+      justify-content: center;
       padding: 0 var(--space-4);
-      gap: var(--space-3);
+      gap: var(--space-4);
       flex-shrink: 0;
       z-index: 20;
     }
@@ -929,6 +930,14 @@
             <span class="log-msg">Antigravity Coding Engine ready. Gemini 3.8 active.</span>
           </div>
         </div>
+        <div class="chat-input-bar">
+          <div class="command-input-wrap" style="flex: 1; height: 36px;">
+            <input type="text" id="commandInput" placeholder="Prompt Antigravity to build or modify code..." autocomplete="off">
+            <button type="button" class="btn btn-primary btn-sm btn-chat-send" id="sendBtn" onclick="sendCommand()">
+              <span id="sendIcon"></span> Send
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- Terminal View -->
@@ -962,7 +971,7 @@
             <span class="status-dot online"></span> Vision to AI Active
           </span>
         </div>
-        <div style="display: flex; gap: var(--space-2);">
+        <div style="display: flex; gap: var(--space-2); align-items: center;">
           <button class="btn btn-outline btn-sm" onclick="restartPreview()" title="Restart Game">
             <span id="refreshIcon"></span> Restart
           </button>
@@ -1016,14 +1025,6 @@
       <option value="ptt" selected>Push-to-Talk (Hold Space)</option>
       <option value="continuous">Continuous Voice</option>
     </select>
-
-    <!-- Command Input -->
-    <div class="command-input-wrap">
-      <input type="text" id="commandInput" placeholder="Ask Yulya to modify the game (or speak directly to Gemini Live above)..." autocomplete="off">
-      <button class="btn btn-primary btn-sm" id="sendBtn" onclick="sendCommand()">
-        <span id="sendIcon"></span> Send
-      </button>
-    </div>
   </footer>
 
   <!-- Project Selector Modal -->
@@ -2487,6 +2488,12 @@
         btn.classList.add('btn-outline');
         badge.classList.remove('active');
         logTerminal('Screenshare stopped. AI vision stream closed.', 'info');
+        return;
+      }
+
+      if (!isLiveConnected) {
+        ToastManager.show('Please connect to the Live AI call first before starting Screenshare.', 'warning');
+        logTerminal('[CALL] Screenshare requires an active Gemini Live call. Please click "Connect Live AI" first.', 'warning');
         return;
       }
 
