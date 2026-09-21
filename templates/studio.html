@@ -164,25 +164,48 @@
       color: #fff;
     }
 
-    /* Dual Pane Workspace */
+    /* Dual Pane Workspace & Resizable Splitter */
     .workspace-split {
       flex: 1;
-      display: grid;
-      grid-template-columns: 1fr 1fr;
+      display: flex;
       overflow: hidden;
       background-color: var(--bg-base);
+      position: relative;
     }
 
     .panel {
       display: flex;
       flex-direction: column;
       overflow: hidden;
-      border-right: 1px solid var(--border-subtle);
       background-color: var(--bg-base);
     }
 
-    .panel:last-child {
-      border-right: none;
+    .left-panel {
+      width: 50%;
+      min-width: 280px;
+      max-width: calc(100% - 280px);
+      border-right: 1px solid var(--border-subtle);
+      flex-shrink: 0;
+    }
+
+    .split-resizer {
+      width: 6px;
+      background-color: var(--border-subtle);
+      cursor: col-resize;
+      transition: background-color 0.15s ease, box-shadow 0.15s ease;
+      flex-shrink: 0;
+      position: relative;
+      z-index: 15;
+    }
+
+    .split-resizer:hover, .split-resizer.dragging {
+      background-color: var(--accent-primary);
+      box-shadow: 0 0 10px rgba(139, 92, 246, 0.6);
+    }
+
+    .right-panel {
+      flex: 1;
+      min-width: 280px;
     }
 
     .panel-header {
@@ -194,6 +217,7 @@
       justify-content: space-between;
       padding: 0 var(--space-3);
       flex-shrink: 0;
+      gap: var(--space-2);
     }
 
     .tabs-group {
@@ -201,14 +225,19 @@
       align-items: center;
       gap: 2px;
       height: 100%;
+      overflow-x: auto;
+    }
+
+    .tabs-group::-webkit-scrollbar {
+      display: none;
     }
 
     .tab-btn {
       display: flex;
       align-items: center;
-      gap: var(--space-2);
+      gap: 6px;
       height: 100%;
-      padding: 0 var(--space-3);
+      padding: 0 10px;
       background: transparent;
       border: none;
       border-bottom: 2px solid transparent;
@@ -217,6 +246,7 @@
       font-family: var(--font-code);
       cursor: pointer;
       transition: var(--transition-fast);
+      white-space: nowrap;
     }
 
     .tab-btn:hover {
@@ -228,6 +258,146 @@
       color: var(--text-primary);
       border-bottom-color: var(--accent-primary);
       background-color: rgba(139, 92, 246, 0.06);
+      font-weight: 600;
+    }
+
+    .preset-group {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+    }
+
+    .btn-preset {
+      padding: 2px 7px;
+      font-size: 11px;
+      font-family: var(--font-code);
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: var(--transition-fast);
+      line-height: 1.4;
+      user-select: none;
+    }
+
+    .btn-preset:hover {
+      color: var(--text-primary);
+      border-color: var(--border-active);
+      background: rgba(139, 92, 246, 0.15);
+    }
+
+    /* Chat View */
+    .chat-view {
+      flex: 1;
+      display: none;
+      flex-direction: column;
+      background-color: var(--bg-deepest);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .chat-view.active {
+      display: flex;
+    }
+
+    .chat-feed {
+      flex: 1;
+      overflow-y: auto;
+      padding: var(--space-4);
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-3);
+    }
+
+    .chat-bubble-row {
+      display: flex;
+      flex-direction: column;
+      max-width: 85%;
+      animation: fadeInBubble 0.2s ease-out;
+    }
+
+    .chat-bubble-row.user {
+      align-self: flex-end;
+      align-items: flex-end;
+    }
+
+    .chat-bubble-row.ai {
+      align-self: flex-start;
+      align-items: flex-start;
+    }
+
+    .chat-bubble-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--text-tertiary);
+      margin-bottom: 3px;
+      font-family: var(--font-code);
+    }
+
+    .chat-bubble {
+      padding: 10px 14px;
+      border-radius: var(--radius-md);
+      font-size: 13px;
+      line-height: 1.5;
+      word-break: break-word;
+      white-space: pre-wrap;
+    }
+
+    .chat-bubble.user {
+      background: linear-gradient(135deg, rgba(139, 92, 246, 0.25), rgba(99, 102, 241, 0.25));
+      border: 1px solid rgba(139, 92, 246, 0.4);
+      color: #f8fafc;
+      border-bottom-right-radius: 2px;
+    }
+
+    .chat-bubble.ai {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-primary);
+      border-bottom-left-radius: 2px;
+    }
+
+    .chat-empty-hint {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--text-tertiary);
+      font-size: 13px;
+      text-align: center;
+      gap: 8px;
+      padding: 20px;
+    }
+
+    @keyframes fadeInBubble {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Antigravity View & Terminal View */
+    .antigravity-view, .terminal-view {
+      flex: 1;
+      display: none;
+      flex-direction: column;
+      background-color: var(--bg-deepest);
+      overflow: hidden;
+    }
+
+    .antigravity-view.active, .terminal-view.active {
+      display: flex;
+    }
+
+    .terminal-feed {
+      flex: 1;
+      overflow-y: auto;
+      padding: var(--space-3);
+      font-family: var(--font-code);
+      font-size: 12px;
+      line-height: 1.6;
     }
 
     /* Code View Area */
@@ -273,28 +443,6 @@
     @keyframes code-update-flash {
       0% { background-color: rgba(139, 92, 246, 0.25); }
       100% { background-color: transparent; }
-    }
-
-    /* Terminal View */
-    .terminal-view {
-      flex: 1;
-      display: none;
-      flex-direction: column;
-      background-color: var(--bg-deepest);
-      overflow: hidden;
-    }
-
-    .terminal-view.active {
-      display: flex;
-    }
-
-    .terminal-feed {
-      flex: 1;
-      overflow-y: auto;
-      padding: var(--space-3);
-      font-family: var(--font-code);
-      font-size: 12px;
-      line-height: 1.6;
     }
 
     .log-line {
@@ -536,12 +684,21 @@
 
     @media (max-width: 960px) {
       .workspace-split {
-        grid-template-columns: 1fr;
-        grid-template-rows: 1fr 1fr;
+        flex-direction: column;
       }
-      .panel {
+      .left-panel {
+        width: 100% !important;
+        height: 50%;
+        max-width: 100%;
         border-right: none;
         border-bottom: 1px solid var(--border-subtle);
+      }
+      .split-resizer {
+        display: none;
+      }
+      .right-panel {
+        width: 100%;
+        height: 50%;
       }
       .status-pill.waterfall-pill {
         display: none;
@@ -658,13 +815,19 @@
     </div>
   </header>
 
-  <!-- Dual Pane Workspace -->
+  <!-- Dual Pane Workspace with Draggable Resizer -->
   <div class="workspace-split">
-    <!-- Left Pane: Code & Terminal -->
-    <div class="panel">
+    <!-- Left Pane: Chat, Antigravity, Terminal, Code -->
+    <div class="panel left-panel" id="leftPanel">
       <div class="panel-header">
         <div class="tabs-group">
-          <button class="tab-btn active" id="tabTerminal" onclick="switchTab('terminal')">
+          <button class="tab-btn active" id="tabChat" onclick="switchTab('chat')">
+            <span id="chatTabIcon"></span> Chat
+          </button>
+          <button class="tab-btn" id="tabAntigravity" onclick="switchTab('antigravity')">
+            <span id="antigravityTabIcon"></span> Antigravity
+          </button>
+          <button class="tab-btn" id="tabTerminal" onclick="switchTab('terminal')">
             <span id="terminalTabIcon"></span> Terminal
           </button>
           <button class="tab-btn" id="tabIndex" onclick="switchTab('index.html')">
@@ -677,13 +840,51 @@
             app.js
           </button>
         </div>
-        <div style="display: flex; gap: var(--space-2);">
+        <div style="display: flex; gap: var(--space-2); align-items: center;">
+          <!-- Quick Split Presets -->
+          <div class="preset-group" title="Resize Panes">
+            <button type="button" class="btn-preset" onclick="setPanelWidth(50)">50/50</button>
+            <button type="button" class="btn-preset" onclick="setPanelWidth(65)">65/35</button>
+            <button type="button" class="btn-preset" onclick="setPanelWidth(35)">35/65</button>
+          </div>
           <button class="btn btn-outline btn-sm" id="copyCodeBtn" style="display: none;" onclick="copyCurrentCode()">
             <span id="copyIcon"></span> Copy
           </button>
-          <button class="btn btn-outline btn-sm" id="clearTerminalBtn" onclick="clearTerminal()">
+          <button class="btn btn-outline btn-sm" id="clearTabBtn" onclick="clearCurrentTab()">
             Clear
           </button>
+        </div>
+      </div>
+
+      <!-- Chat View (Active Default) -->
+      <div class="chat-view active" id="chatView">
+        <div class="chat-feed" id="chatFeed">
+          <div class="chat-empty-hint" id="chatEmptyHint">
+            <div style="font-weight: 600; color: var(--text-secondary); font-size: 14px;">Voice & Chat Co-Pilot</div>
+            <div>Connect Live AI to begin your game design session, or type your idea below.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Antigravity Engine View -->
+      <div class="antigravity-view" id="antigravityView">
+        <div class="terminal-feed" id="antigravityFeed">
+          <div class="log-line">
+            <span class="log-time">00:00:00</span>
+            <span class="log-badge thinking">AI</span>
+            <span class="log-msg">Antigravity Coding Engine ready. Waterfall multi-model active.</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Terminal View -->
+      <div class="terminal-view" id="terminalView">
+        <div class="terminal-feed" id="terminalFeed">
+          <div class="log-line">
+            <span class="log-time">00:00:00</span>
+            <span class="log-badge info">INFO</span>
+            <span class="log-msg">Repository loaded for @{{ user.username }}/{{ active_slug }}. Sandbox isolated to this game folder.</span>
+          </div>
         </div>
       </div>
 
@@ -692,26 +893,13 @@
         <div class="line-numbers" id="lineNumbers">1</div>
         <pre class="code-content" id="codeDisplay"></pre>
       </div>
-
-      <!-- Terminal View -->
-      <div class="terminal-view active" id="terminalView">
-        <div class="terminal-feed" id="terminalFeed">
-          <div class="log-line">
-            <span class="log-time">00:00:00</span>
-            <span class="log-badge info">INFO</span>
-            <span class="log-msg">Repository loaded for @{{ user.username }}/{{ active_slug }}. Sandbox isolated to this game folder.</span>
-          </div>
-          <div class="log-line">
-            <span class="log-time">00:00:00</span>
-            <span class="log-badge thinking">AI</span>
-            <span class="log-msg">Antigravity Coding Engine ready with multi-model waterfall.</span>
-          </div>
-        </div>
-      </div>
     </div>
 
+    <!-- Draggable Resizer Bar -->
+    <div class="split-resizer" id="splitResizer" title="Drag to resize panes"></div>
+
     <!-- Right Pane: Game Live Preview -->
-    <div class="panel">
+    <div class="panel right-panel" id="rightPanel">
       <div class="panel-header">
         <div style="display: flex; align-items: center; gap: var(--space-2);">
           <span class="status-dot live"></span>
@@ -763,16 +951,16 @@
       <div class="wave-bar"></div>
     </div>
 
-    <!-- Push-to-Talk Button -->
-    <button type="button" class="ptt-trigger-btn" id="pttBtn" style="display: none;">
+    <!-- Push-to-Talk Button (Visible by default) -->
+    <button type="button" class="ptt-trigger-btn" id="pttBtn" style="display: inline-flex;">
       <span id="micIcon"></span>
       <span id="pttLabel">Hold Space to Talk</span>
     </button>
 
-    <!-- Voice Mode Select -->
+    <!-- Voice Mode Select (PTT Default) -->
     <select class="voice-mode-select" id="voiceModeSelect" onchange="handleVoiceModeChange()">
-      <option value="continuous" selected>Continuous Voice</option>
-      <option value="ptt">Push-to-Talk</option>
+      <option value="ptt" selected>Push-to-Talk (Hold Space)</option>
+      <option value="continuous">Continuous Voice</option>
     </select>
 
     <!-- Command Input -->
@@ -908,6 +1096,8 @@
     safeSetIcon('shareIcon', Icons.share('icon-sm'));
     safeSetIcon('downloadIcon', Icons.download('icon-sm'));
     safeSetIcon('logoutIcon', Icons.logout('icon-sm'));
+    safeSetIcon('chatTabIcon', Icons.chat('icon-sm'));
+    safeSetIcon('antigravityTabIcon', Icons.cpu('icon-sm'));
     safeSetIcon('terminalTabIcon', Icons.terminal('icon-sm'));
     safeSetIcon('refreshIcon', Icons.refresh('icon-sm'));
     safeSetIcon('screenIcon', Icons.screen('icon-sm'));
@@ -924,12 +1114,14 @@
     safeSetIcon('paletteSearchIcon', Icons.terminal('icon-sm'));
 
     // Studio State
-    let activeTab = 'terminal';
+    let activeTab = 'chat'; // 'chat' is default active tab
     let fileContents = {
       'index.html': '',
       'style.css': '',
       'app.js': ''
     };
+    let chatHistory = [];
+    let antigravityHistory = [];
     let terminalHistory = [];
     let commandQueue = [];
     let ws = null;
@@ -937,15 +1129,82 @@
     let screenStream = null;
     let screenInterval = null;
 
-    // Live Voice State
+    // Live Voice State - Default PTT
     let isLiveConnected = false;
-    let voiceMode = 'continuous'; // 'continuous' (default) or 'ptt'
+    let voiceMode = 'ptt'; // 'ptt' (default) or 'continuous'
     let liveAudioPlayer = null;
     let micAudioContext = null;
     let micStream = null;
     let micProcessor = null;
     let isSpeaking = false;
     let isListening = false;
+    let isPTTActive = false;
+
+    // Speech Recognition State
+    let speechRecognizer = null;
+    let currentSpeechTranscript = '';
+    let isSpeechRecognitionActive = false;
+
+    // --- Draggable Split Resizer & Preset Handlers ---
+    function initSplitResizer() {
+      const resizer = document.getElementById('splitResizer');
+      const leftPanel = document.getElementById('leftPanel');
+      const container = document.querySelector('.workspace-split');
+      const iframe = document.getElementById('gameIframe');
+      if (!resizer || !leftPanel || !container) return;
+
+      const savedWidth = localStorage.getItem('yulya_studio_panel_width');
+      if (savedWidth) {
+        const parsed = parseFloat(savedWidth);
+        if (!isNaN(parsed) && parsed >= 20 && parsed <= 80) {
+          leftPanel.style.width = `${parsed}%`;
+        }
+      }
+
+      let isDragging = false;
+
+      resizer.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        resizer.classList.add('dragging');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        if (iframe) iframe.style.pointerEvents = 'none';
+        e.preventDefault();
+      });
+
+      window.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        const rect = container.getBoundingClientRect();
+        const offsetX = e.clientX - rect.left;
+        let percentage = (offsetX / rect.width) * 100;
+        percentage = Math.max(20, Math.min(80, percentage));
+        leftPanel.style.width = `${percentage}%`;
+        leftPanel.style.flex = 'none';
+      });
+
+      window.addEventListener('mouseup', () => {
+        if (isDragging) {
+          isDragging = false;
+          resizer.classList.remove('dragging');
+          document.body.style.cursor = '';
+          document.body.style.userSelect = '';
+          if (iframe) iframe.style.pointerEvents = 'auto';
+          const currentPct = parseFloat(leftPanel.style.width);
+          if (!isNaN(currentPct)) {
+            localStorage.setItem('yulya_studio_panel_width', currentPct);
+          }
+        }
+      });
+    }
+
+    function setPanelWidth(pct) {
+      const leftPanel = document.getElementById('leftPanel');
+      if (leftPanel) {
+        leftPanel.style.width = `${pct}%`;
+        leftPanel.style.flex = 'none';
+        localStorage.setItem('yulya_studio_panel_width', pct);
+      }
+    }
 
     // --- In-Browser Web Audio Player for Gemini Live (24kHz PCM) ---
     class LiveAudioPlayer {
@@ -1062,14 +1321,134 @@
       });
     }
 
-    // Terminal Loader Helpers
-    function showTerminalLoader(text = 'Antigravity is coding your game...') {
-      const feed = document.getElementById('terminalFeed');
+    // --- Web Speech API Setup for High-Accuracy Speech Recognition ---
+    function setupSpeechRecognizer() {
+      const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRec) {
+        console.log('[SPEECH] Browser speech recognition not supported; using 16kHz PCM audio stream.');
+        return null;
+      }
+      try {
+        const rec = new SpeechRec();
+        rec.continuous = true;
+        rec.interimResults = true;
+        rec.lang = 'en-US';
+
+        rec.onresult = (e) => {
+          let interim = '';
+          let final = '';
+          for (let i = e.resultIndex; i < e.results.length; ++i) {
+            if (e.results[i].isFinal) {
+              final += e.results[i][0].transcript;
+            } else {
+              interim += e.results[i][0].transcript;
+            }
+          }
+          currentSpeechTranscript = (final || interim).trim();
+          if (currentSpeechTranscript) {
+            setLiveStatus(`Listening: "${currentSpeechTranscript.slice(-30)}"`, 'listening');
+          }
+        };
+
+        rec.onerror = (e) => {
+          console.warn('[SPEECH REC ERROR]', e.error);
+        };
+
+        rec.onend = () => {
+          isSpeechRecognitionActive = false;
+        };
+        return rec;
+      } catch (err) {
+        console.warn('[SPEECH REC INIT ERROR]', err);
+        return null;
+      }
+    }
+    speechRecognizer = setupSpeechRecognizer();
+
+    // --- Chat Tab Feed Management ---
+    let currentAiChatBubble = null;
+    let currentAiChatText = '';
+
+    function addChatMessage(sender, text, timeStr = null) {
+      const feed = document.getElementById('chatFeed');
+      if (!feed || !text) return;
+      const hint = document.getElementById('chatEmptyHint');
+      if (hint) hint.style.display = 'none';
+
+      const now = new Date();
+      const time = timeStr || now.toTimeString().split(' ')[0];
+      chatHistory.push({ sender, text, time });
+
+      const row = document.createElement('div');
+      row.className = `chat-bubble-row ${sender}`;
+
+      const header = document.createElement('div');
+      header.className = 'chat-bubble-header';
+      const label = sender === 'user' ? 'YOU' : 'GEMINI 3.8 LIVE';
+      const color = sender === 'user' ? '#38bdf8' : '#c084fc';
+      header.innerHTML = `<span style="color: ${color}; font-weight: 700;">${label}</span><span>${time}</span>`;
+
+      const bubble = document.createElement('div');
+      bubble.className = `chat-bubble ${sender}`;
+      bubble.textContent = text;
+
+      row.appendChild(header);
+      row.appendChild(bubble);
+      feed.appendChild(row);
+      feed.scrollTop = feed.scrollHeight;
+    }
+
+    function appendAiChatText(chunk) {
+      if (!chunk) return;
+      const feed = document.getElementById('chatFeed');
       if (!feed) return;
-      let loader = document.getElementById('terminalLoader');
+      const hint = document.getElementById('chatEmptyHint');
+      if (hint) hint.style.display = 'none';
+
+      if (!currentAiChatBubble) {
+        const now = new Date();
+        const time = now.toTimeString().split(' ')[0];
+
+        const row = document.createElement('div');
+        row.className = 'chat-bubble-row ai';
+
+        const header = document.createElement('div');
+        header.className = 'chat-bubble-header';
+        header.innerHTML = `<span style="color: #c084fc; font-weight: 700;">GEMINI 3.8 LIVE</span><span>${time}</span>`;
+
+        const bubble = document.createElement('div');
+        bubble.className = 'chat-bubble ai';
+
+        row.appendChild(header);
+        row.appendChild(bubble);
+        feed.appendChild(row);
+
+        currentAiChatBubble = bubble;
+        currentAiChatText = '';
+      }
+
+      currentAiChatText += chunk;
+      currentAiChatBubble.textContent = currentAiChatText;
+      feed.scrollTop = feed.scrollHeight;
+    }
+
+    function finalizeAiChatTurn() {
+      if (currentAiChatText.trim()) {
+        const now = new Date();
+        chatHistory.push({ sender: 'ai', text: currentAiChatText.trim(), time: now.toTimeString().split(' ')[0] });
+      }
+      currentAiChatBubble = null;
+      currentAiChatText = '';
+    }
+
+    // --- Antigravity Engine Loader & Logging ---
+    function showAntigravityLoader(text = 'Antigravity is coding your game...') {
+      const feed = document.getElementById('antigravityFeed');
+      if (!feed) return;
+      let loader = document.getElementById('antigravityLoader');
       if (!loader) {
         loader = document.createElement('div');
-        loader.id = 'terminalLoader';
+        loader.id = 'antigravityLoader';
         loader.className = 'terminal-loader';
         loader.innerHTML = `<div class="terminal-spinner"></div><span class="terminal-loader-text typing-dots">${text}</span>`;
         feed.appendChild(loader);
@@ -1082,33 +1461,29 @@
       feed.scrollTop = feed.scrollHeight;
     }
 
-    function updateTerminalLoader(text) {
-      const loader = document.getElementById('terminalLoader');
+    function updateAntigravityLoader(text) {
+      const loader = document.getElementById('antigravityLoader');
       if (loader) {
         const textSpan = loader.querySelector('.terminal-loader-text');
         if (textSpan) textSpan.textContent = text;
-        const feed = document.getElementById('terminalFeed');
+        const feed = document.getElementById('antigravityFeed');
         if (feed) feed.scrollTop = feed.scrollHeight;
       } else {
-        showTerminalLoader(text);
+        showAntigravityLoader(text);
       }
     }
 
-    function hideTerminalLoader() {
-      const loader = document.getElementById('terminalLoader');
-      if (loader) {
-        loader.remove();
-      }
+    function hideAntigravityLoader() {
+      const loader = document.getElementById('antigravityLoader');
+      if (loader) loader.remove();
     }
 
-    // Terminal Logging
-    function logTerminal(message, level = 'info', customTime = null) {
-      const feed = document.getElementById('terminalFeed');
+    function logAntigravity(message, level = 'info', customTime = null) {
+      const feed = document.getElementById('antigravityFeed');
       if (!feed) return;
       const now = new Date();
       const timeStr = customTime || now.toTimeString().split(' ')[0];
 
-      // Parse Antigravity step prefixes if present
       const stepMatch = typeof message === 'string' ? message.match(/^\[([A-Z_]+)\]\s*(.*)$/) : null;
       let stepTag = level;
       let displayMsg = message;
@@ -1117,8 +1492,7 @@
         displayMsg = stepMatch[2];
       }
 
-      const item = { time: timeStr, level: stepTag, message: displayMsg };
-      terminalHistory.push(item);
+      antigravityHistory.push({ time: timeStr, level: stepTag, message: displayMsg });
 
       const line = document.createElement('div');
       line.className = 'log-line';
@@ -1139,7 +1513,7 @@
       line.appendChild(badgeSpan);
       line.appendChild(msgSpan);
 
-      const loader = document.getElementById('terminalLoader');
+      const loader = document.getElementById('antigravityLoader');
       if (loader) {
         feed.insertBefore(line, loader);
       } else {
@@ -1148,35 +1522,101 @@
       feed.scrollTop = feed.scrollHeight;
     }
 
-    function clearTerminal() {
-      document.getElementById('terminalFeed').innerHTML = '';
-      terminalHistory = [];
+    // --- Terminal System Logging ---
+    function logTerminal(message, level = 'info', customTime = null) {
+      const feed = document.getElementById('terminalFeed');
+      if (!feed) return;
+      const now = new Date();
+      const timeStr = customTime || now.toTimeString().split(' ')[0];
+
+      const stepMatch = typeof message === 'string' ? message.match(/^\[([A-Z_]+)\]\s*(.*)$/) : null;
+      let stepTag = level;
+      let displayMsg = message;
+      if (stepMatch) {
+        stepTag = stepMatch[1].toLowerCase();
+        displayMsg = stepMatch[2];
+      }
+
+      terminalHistory.push({ time: timeStr, level: stepTag, message: displayMsg });
+
+      const line = document.createElement('div');
+      line.className = 'log-line';
+
+      const timeSpan = document.createElement('span');
+      timeSpan.className = 'log-time';
+      timeSpan.textContent = timeStr;
+
+      const badgeSpan = document.createElement('span');
+      badgeSpan.className = `log-badge ${stepTag}`;
+      badgeSpan.textContent = stepTag.toUpperCase();
+
+      const msgSpan = document.createElement('span');
+      msgSpan.className = 'log-msg';
+      msgSpan.textContent = displayMsg;
+
+      line.appendChild(timeSpan);
+      line.appendChild(badgeSpan);
+      line.appendChild(msgSpan);
+
+      feed.appendChild(line);
+      feed.scrollTop = feed.scrollHeight;
     }
 
-    // Tab Navigation
+    function clearCurrentTab() {
+      if (activeTab === 'chat') {
+        const feed = document.getElementById('chatFeed');
+        feed.innerHTML = `
+          <div class="chat-empty-hint" id="chatEmptyHint">
+            <div style="font-weight: 600; color: var(--text-secondary); font-size: 14px;">Voice & Chat Co-Pilot</div>
+            <div>Connect Live AI to begin your game design session, or type your idea below.</div>
+          </div>`;
+        chatHistory = [];
+      } else if (activeTab === 'antigravity') {
+        document.getElementById('antigravityFeed').innerHTML = '';
+        antigravityHistory = [];
+      } else if (activeTab === 'terminal') {
+        document.getElementById('terminalFeed').innerHTML = '';
+        terminalHistory = [];
+      }
+    }
+
+    // --- Tab Navigation (6 Tabs) ---
     function switchTab(tabName) {
       activeTab = tabName;
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
 
-      const termView = document.getElementById('terminalView');
+      const chatView = document.getElementById('chatView');
+      const antigravityView = document.getElementById('antigravityView');
+      const terminalView = document.getElementById('terminalView');
       const editorView = document.getElementById('codeEditorView');
       const copyBtn = document.getElementById('copyCodeBtn');
-      const clearBtn = document.getElementById('clearTerminalBtn');
+      const clearBtn = document.getElementById('clearTabBtn');
 
-      if (tabName === 'terminal') {
+      // Hide all panels initially
+      chatView.classList.remove('active');
+      antigravityView.classList.remove('active');
+      terminalView.classList.remove('active');
+      editorView.style.display = 'none';
+
+      copyBtn.style.display = 'none';
+      clearBtn.style.display = 'inline-flex';
+
+      if (tabName === 'chat') {
+        document.getElementById('tabChat').classList.add('active');
+        chatView.classList.add('active');
+      } else if (tabName === 'antigravity') {
+        document.getElementById('tabAntigravity').classList.add('active');
+        antigravityView.classList.add('active');
+      } else if (tabName === 'terminal') {
         document.getElementById('tabTerminal').classList.add('active');
-        termView.classList.add('active');
-        editorView.style.display = 'none';
-        copyBtn.style.display = 'none';
-        clearBtn.style.display = 'inline-flex';
+        terminalView.classList.add('active');
       } else {
         const btnId = tabName === 'index.html' ? 'tabIndex' : tabName === 'style.css' ? 'tabStyle' : 'tabApp';
-        document.getElementById(btnId).classList.add('active');
-        termView.classList.remove('active');
+        const btn = document.getElementById(btnId);
+        if (btn) btn.classList.add('active');
         editorView.style.display = 'flex';
         copyBtn.style.display = 'inline-flex';
         clearBtn.style.display = 'none';
-
         displayCodeFile(tabName);
       }
     }
@@ -1187,7 +1627,9 @@
         const data = await res.json();
         if (data.success && data.files) {
           fileContents = data.files;
-          if (activeTab !== 'terminal') displayCodeFile(activeTab);
+          if (activeTab === 'index.html' || activeTab === 'style.css' || activeTab === 'app.js') {
+            displayCodeFile(activeTab);
+          }
         }
       } catch (e) {}
     }
@@ -1197,10 +1639,28 @@
         const res = await fetch(`/api/project-logs/${ACTIVE_SLUG}`);
         const data = await res.json();
         if (data.success && data.logs && data.logs.length > 0) {
-          const feed = document.getElementById('terminalFeed');
-          feed.innerHTML = '';
+          const antigravityFeed = document.getElementById('antigravityFeed');
+          const termFeed = document.getElementById('terminalFeed');
+          if (antigravityFeed) antigravityFeed.innerHTML = '';
+          if (termFeed) termFeed.innerHTML = '';
+
           data.logs.forEach(item => {
-            logTerminal(item.message, item.step || 'info', item.time);
+            const msg = item.message || '';
+            const step = (item.step || 'info').toLowerCase();
+            const isAntigravity = (
+              step === 'thinking' || step === 'diff' || step === 'replace_content' ||
+              step === 'verify' || step === 'pass' || step === 'fail' || step === 'search' ||
+              step === 'read_file' || step === 'architect' ||
+              msg.startsWith('[THINKING]') || msg.startsWith('[DIFF]') ||
+              msg.startsWith('[REPLACE_CONTENT]') || msg.startsWith('[VERIFY]') ||
+              msg.startsWith('[PASS]') || msg.startsWith('[FAIL]') ||
+              msg.startsWith('[ARCHITECT]') || msg.startsWith('[USER]')
+            );
+            if (isAntigravity) {
+              logAntigravity(msg, step, item.time);
+            } else {
+              logTerminal(msg, step, item.time);
+            }
           });
           logTerminal(`[RESUME] Workspace restored for @${USERNAME}/${ACTIVE_SLUG}. Session active.`, 'pass');
         }
@@ -1218,7 +1678,7 @@
     }
 
     function copyCurrentCode() {
-      if (activeTab !== 'terminal') {
+      if (activeTab === 'index.html' || activeTab === 'style.css' || activeTab === 'app.js') {
         const code = fileContents[activeTab] || '';
         copyToClipboard(code, `Copied ${activeTab} to clipboard`);
       }
@@ -1256,25 +1716,39 @@
             const data = JSON.parse(event.data);
             
             if (data.type === 'log') {
-              logTerminal(data.message, data.level || 'info');
-              const lvl = (data.level || '').toLowerCase();
-              if (lvl === 'thinking') {
-                updateTerminalLoader('Antigravity is planning code architecture...');
-              } else if (lvl === 'diff') {
-                updateTerminalLoader('Writing code changes...');
-              } else if (lvl === 'replace_content') {
-                updateTerminalLoader('Applying updates to files...');
-              } else if (lvl === 'verify') {
-                updateTerminalLoader('Verifying syntax and game loop...');
-              } else if (lvl === 'pass') {
-                hideTerminalLoader();
-              } else if (lvl === 'error' || lvl === 'fail') {
-                hideTerminalLoader();
+              const msg = data.message || '';
+              const lvl = (data.level || 'info').toLowerCase();
+
+              const isAntigravity = (
+                lvl === 'thinking' || lvl === 'diff' || lvl === 'replace_content' ||
+                lvl === 'verify' || lvl === 'pass' || lvl === 'fail' || lvl === 'search' ||
+                lvl === 'read_file' || lvl === 'architect' ||
+                msg.startsWith('[THINKING]') || msg.startsWith('[DIFF]') ||
+                msg.startsWith('[REPLACE_CONTENT]') || msg.startsWith('[VERIFY]') ||
+                msg.startsWith('[PASS]') || msg.startsWith('[FAIL]') ||
+                msg.startsWith('[ARCHITECT]') || msg.startsWith('[USER]')
+              );
+
+              if (isAntigravity) {
+                logAntigravity(msg, lvl);
+                if (lvl === 'thinking') {
+                  updateAntigravityLoader('Antigravity is planning code architecture...');
+                } else if (lvl === 'diff') {
+                  updateAntigravityLoader('Writing code changes...');
+                } else if (lvl === 'replace_content') {
+                  updateAntigravityLoader('Applying updates to files...');
+                } else if (lvl === 'verify') {
+                  updateAntigravityLoader('Verifying syntax and game loop...');
+                } else if (lvl === 'pass' || lvl === 'fail' || lvl === 'error') {
+                  hideAntigravityLoader();
+                }
+              } else {
+                logTerminal(msg, lvl);
               }
             } else if (data.type === 'show_loader') {
-              showTerminalLoader(data.text || 'Antigravity is coding your game...');
+              showAntigravityLoader(data.text || 'Antigravity is coding your game...');
             } else if (data.type === 'hide_loader') {
-              hideTerminalLoader();
+              hideAntigravityLoader();
             } else if (data.type === 'set_command_input') {
               const input = document.getElementById('commandInput');
               const wrap = document.querySelector('.command-input-wrap');
@@ -1287,22 +1761,23 @@
                     void wrap.offsetWidth;
                     wrap.classList.add('input-highlight');
                   }
-                  logTerminal(`[ARCHITECT_DRAFT] Prompt placed in command box: "${data.text}"`, 'info');
+                  logAntigravity(`[ARCHITECT_DRAFT] Prompt placed in command box: "${data.text}"`, 'info');
                   ToastManager.show('Prompt drafted in command box. Review & press Enter, or say "send it"!', 'info');
                 }
               }
             } else if (data.type === 'ai_audio') {
-              // Play Gemini Live streaming voice through browser speakers
               setLiveStatus('Gemini 3.8 Live Speaking...', 'speaking');
               if (data.pcm) {
                 liveAudioPlayer.playPCMChunk(data.pcm, data.rate || 24000);
               }
             } else if (data.type === 'ai_text') {
-              logTerminal(`[LIVE_AI] ${data.text}`, 'live');
+              appendAiChatText(data.text);
             } else if (data.type === 'ai_turn_complete') {
               setLiveStatus('Gemini 3.8 Live Ready', 'online');
+              finalizeAiChatTurn();
             } else if (data.type === 'ai_interrupted') {
               liveAudioPlayer.stop();
+              finalizeAiChatTurn();
               logTerminal('[LIVE_AI] Speech interrupted by user input', 'live');
             } else if (data.type === 'live_status') {
               if (data.status === 'connected') {
@@ -1312,7 +1787,7 @@
                   isListening = true;
                   setLiveStatus('Continuous Voice Active', 'listening');
                   animateWaveform('listening');
-                  logTerminal(`[LIVE_AI] Connected to ${data.model || 'Gemini 3.8 Live Extended Thinking (High)'}. Continuous voice active. Speak naturally.`, 'live');
+                  logTerminal(`[LIVE_AI] Connected to ${data.model || 'Gemini 3.8 Live Extended Thinking (High)'}. Continuous voice active.`, 'live');
                 } else {
                   setLiveStatus(data.model || 'Gemini 3.8 Live Ready', 'online');
                   logTerminal(`[LIVE_AI] Connected to ${data.model || 'Gemini 3.8 Live Extended Thinking (High)'}. Hold Space to talk.`, 'live');
@@ -1335,11 +1810,11 @@
               setLiveStatus('Gemini 3.8 Live Error', 'offline');
               updateLiveButton(false);
             } else if (data.type === 'code_update') {
-              hideTerminalLoader();
-              logTerminal(`[PASS] ${data.summary}`, 'pass');
+              hideAntigravityLoader();
+              logAntigravity(`[PASS] ${data.summary}`, 'pass');
               if (data.content) {
                 fileContents = data.content;
-                if (activeTab !== 'terminal') {
+                if (activeTab === 'index.html' || activeTab === 'style.css' || activeTab === 'app.js') {
                   displayCodeFile(activeTab);
                   const disp = document.getElementById('codeDisplay');
                   disp.classList.remove('flash');
@@ -1374,19 +1849,22 @@
       const pill = document.getElementById('liveAiPill');
       const dot = document.getElementById('liveStatusDot');
       const label = document.getElementById('liveStatusText');
-      dot.className = `status-dot ${dotClass}`;
-      label.textContent = text;
+      if (dot) dot.className = `status-dot ${dotClass}`;
+      if (label) label.textContent = text;
 
-      if (dotClass === 'online' || dotClass === 'speaking' || dotClass === 'listening' || dotClass === 'thinking') {
-        pill.classList.add('active');
-      } else {
-        pill.classList.remove('active');
+      if (pill) {
+        if (dotClass === 'online' || dotClass === 'speaking' || dotClass === 'listening' || dotClass === 'thinking') {
+          pill.classList.add('active');
+        } else {
+          pill.classList.remove('active');
+        }
       }
     }
 
     function updateLiveButton(connected, connecting = false) {
       const btn = document.getElementById('liveToggleBtn');
       const label = document.getElementById('liveBtnLabel');
+      if (!btn || !label) return;
       if (connecting) {
         btn.classList.remove('connected');
         btn.style.opacity = '0.75';
@@ -1411,7 +1889,6 @@
       }
 
       if (isLiveConnected) {
-        // Disconnect
         ws.send(JSON.stringify({ type: 'disconnect_live' }));
         liveAudioPlayer.stop();
         stopMicrophone();
@@ -1421,13 +1898,11 @@
         logTerminal('[LIVE_AI] Disconnected from Gemini 3.8 Live', 'info');
         ToastManager.show('Live AI Disconnected', 'info');
       } else {
-        // Connect
         setLiveStatus('Connecting to Gemini 3.8 Live...', 'connecting');
         updateLiveButton(false, true);
         logTerminal('[LIVE] Connecting to Gemini 3.8 Live Extended Thinking (High)...', 'thinking');
         ws.send(JSON.stringify({ type: 'connect_live' }));
         liveAudioPlayer.init();
-        // Pre-warm microphone immediately so permissions and audio pipeline are ready with zero lag
         startMicrophone().then(ok => {
           if (ok && voiceMode === 'continuous') {
             isListening = true;
@@ -1480,7 +1955,6 @@
         });
 
         const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-        // Native hardware AudioContext avoids NotSupportedError on Windows
         micAudioContext = new AudioContextClass();
         if (micAudioContext.state === 'suspended') {
           await micAudioContext.resume().catch(() => {});
@@ -1495,7 +1969,6 @@
 
           const inputData = e.inputBuffer.getChannelData(0);
 
-          // Real-time audio volume RMS calculation for visualizer
           let sum = 0;
           for (let i = 0; i < inputData.length; i++) {
             sum += inputData[i] * inputData[i];
@@ -1505,10 +1978,7 @@
             animateWaveform('listening');
           }
 
-          // Downsample from hardware sample rate to 16kHz
           const downsampled = downsampleTo16kHz(inputData, micAudioContext.sampleRate);
-
-          // Convert Float32 to Int16 PCM
           const buffer = new ArrayBuffer(downsampled.length * 2);
           const view = new DataView(buffer);
           for (let i = 0; i < downsampled.length; i++) {
@@ -1516,7 +1986,6 @@
             view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
           }
 
-          // Convert to base64
           let binary = '';
           const bytes = new Uint8Array(buffer);
           for (let i = 0; i < bytes.byteLength; i++) {
@@ -1527,7 +1996,6 @@
           ws.send(JSON.stringify({ type: 'audio_chunk', pcm: base64Data }));
         };
 
-        // Mute node prevents microphone loopback through speakers
         const muteNode = micAudioContext.createGain();
         muteNode.gain.value = 0;
         source.connect(micProcessor);
@@ -1582,8 +2050,7 @@
       }
     }
 
-    // Push-to-Talk Handling
-    let isPTTActive = false;
+    // --- Push-to-Talk Handling (Hold Space to Talk) ---
     const pttBtn = document.getElementById('pttBtn');
 
     async function activatePTT() {
@@ -1597,10 +2064,22 @@
 
       isPTTActive = true;
       isListening = true;
-      pttBtn.classList.add('recording');
-      document.getElementById('pttLabel').textContent = 'Listening... (Release)';
+      currentSpeechTranscript = '';
+      if (pttBtn) pttBtn.classList.add('recording');
+      const label = document.getElementById('pttLabel');
+      if (label) label.textContent = 'Listening... (Release)';
 
+      // Immediately stop any AI voice audio to allow clean interruption
+      liveAudioPlayer.stop();
       liveAudioPlayer.init();
+
+      // Start Web Speech API recognizer
+      if (speechRecognizer) {
+        try {
+          speechRecognizer.start();
+          isSpeechRecognitionActive = true;
+        } catch (e) {}
+      }
 
       const ok = await startMicrophone();
       if (ok && isPTTActive) {
@@ -1613,20 +2092,41 @@
       if (!isPTTActive || voiceMode !== 'ptt') return;
       isPTTActive = false;
       isListening = false;
-      pttBtn.classList.remove('recording');
-      document.getElementById('pttLabel').textContent = 'Hold Space to Talk';
+      if (pttBtn) pttBtn.classList.remove('recording');
+      const label = document.getElementById('pttLabel');
+      if (label) label.textContent = 'Hold Space to Talk';
       stopWaveform();
+
+      if (speechRecognizer && isSpeechRecognitionActive) {
+        try {
+          speechRecognizer.stop();
+        } catch (e) {}
+        isSpeechRecognitionActive = false;
+      }
+
+      const spokenText = currentSpeechTranscript.trim();
+      if (spokenText) {
+        addChatMessage('user', spokenText);
+        logAntigravity(`[USER] Spoken: "${spokenText}"`, 'user');
+      }
+
       if (isLiveConnected) {
         setLiveStatus('Extended Thinking (High)...', 'thinking');
         if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'audio_end' }));
+          ws.send(JSON.stringify({
+            type: 'audio_end',
+            transcript: spokenText
+          }));
         }
       }
+      currentSpeechTranscript = '';
     }
 
-    pttBtn.addEventListener('mousedown', activatePTT);
-    pttBtn.addEventListener('mouseup', deactivatePTT);
-    pttBtn.addEventListener('mouseleave', deactivatePTT);
+    if (pttBtn) {
+      pttBtn.addEventListener('mousedown', activatePTT);
+      pttBtn.addEventListener('mouseup', deactivatePTT);
+      pttBtn.addEventListener('mouseleave', deactivatePTT);
+    }
 
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Space' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA' && !e.repeat && voiceMode === 'ptt') {
@@ -1692,9 +2192,10 @@
     }
 
     async function executeCommand(prompt) {
-      logTerminal(`YOU: ${prompt}`, 'user');
-      logTerminal('Antigravity Coding Engine analyzing request...', 'thinking');
-      showTerminalLoader('Antigravity is analyzing your request...');
+      addChatMessage('user', prompt);
+      logAntigravity(`[USER] ${prompt}`, 'user');
+      logAntigravity('Antigravity Coding Engine analyzing request...', 'thinking');
+      showAntigravityLoader('Antigravity is analyzing your request...');
 
       const sendBtn = document.getElementById('sendBtn');
       sendBtn.disabled = true;
@@ -1706,15 +2207,15 @@
           body: JSON.stringify({ slug: ACTIVE_SLUG, prompt: prompt })
         });
         const data = await res.json();
-        hideTerminalLoader();
+        hideAntigravityLoader();
         if (!data.success) {
-          logTerminal(`Error: ${data.error}`, 'error');
+          logAntigravity(`Error: ${data.error}`, 'error');
           ToastManager.show(data.error || 'Failed to modify game', 'error');
         } else {
-          logTerminal(`[PASS] ${data.summary || 'Game updated live.'}`, 'pass');
+          logAntigravity(`[PASS] ${data.summary || 'Game updated live.'}`, 'pass');
           if (data.content) {
             fileContents = data.content;
-            if (activeTab !== 'terminal') {
+            if (activeTab === 'index.html' || activeTab === 'style.css' || activeTab === 'app.js') {
               displayCodeFile(activeTab);
               const disp = document.getElementById('codeDisplay');
               disp.classList.remove('flash');
@@ -1726,8 +2227,8 @@
           ToastManager.show('Game updated live', 'success');
         }
       } catch (err) {
-        hideTerminalLoader();
-        logTerminal('Network error submitting command.', 'error');
+        hideAntigravityLoader();
+        logAntigravity('Network error submitting command.', 'error');
         ToastManager.show('Request failed', 'error');
       } finally {
         sendBtn.disabled = false;
@@ -2001,6 +2502,7 @@
     window.addEventListener('pagehide', cleanDisconnectAll);
 
     // Startup
+    initSplitResizer();
     loadProjectFiles();
     loadBuildLogs();
     connectWS();

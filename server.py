@@ -1235,18 +1235,26 @@ async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
                         if role == "creator" and ws in ACTIVE_LIVE_SESSIONS:
                             pcm_b64 = data.get("pcm")
                             if pcm_b64:
-                                pcm_bytes = base64.b64decode(pcm_b64)
-                                live_sess = ACTIVE_LIVE_SESSIONS[ws]["session"]
-                                await live_sess.send(input=types.LiveClientRealtimeInput(
-                                    media_chunks=[types.Blob(data=pcm_bytes, mime_type="audio/pcm;rate=16000")]
-                                ))
+                                try:
+                                    pcm_bytes = base64.b64decode(pcm_b64)
+                                    live_sess = ACTIVE_LIVE_SESSIONS[ws]["session"]
+                                    await live_sess.send(input=types.LiveClientRealtimeInput(
+                                        media_chunks=[types.Blob(data=pcm_bytes, mime_type="audio/pcm;rate=16000")]
+                                    ))
+                                except Exception as audio_err:
+                                    print(f"[AUDIO CHUNK SEND ERROR] {audio_err}")
 
                     elif msg_type == "audio_end":
                         # Creator finished speaking turn (signals turn complete to Gemini Live)
                         if role == "creator" and ws in ACTIVE_LIVE_SESSIONS:
                             live_sess = ACTIVE_LIVE_SESSIONS[ws]["session"]
+                            transcript = data.get("transcript", "").strip()
                             try:
-                                await live_sess.send(input=types.LiveClientContent(turn_complete=True))
+                                if transcript:
+                                    # Send recognized speech transcript to guarantee 100% accurate comprehension
+                                    await live_sess.send(input=transcript, end_of_turn=True)
+                                else:
+                                    await live_sess.send(input=types.LiveClientContent(turn_complete=True))
                             except Exception as e:
                                 print(f"[LIVE] Error sending turn_complete: {e}")
 
