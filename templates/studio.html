@@ -1253,6 +1253,10 @@
               } else if (lvl === 'error' || lvl === 'fail') {
                 hideTerminalLoader();
               }
+            } else if (data.type === 'show_loader') {
+              showTerminalLoader(data.text || 'Antigravity is coding your game...');
+            } else if (data.type === 'hide_loader') {
+              hideTerminalLoader();
             } else if (data.type === 'ai_audio') {
               // Play Gemini Live streaming voice through browser speakers
               setLiveStatus('Gemini 3.8 Live Speaking...', 'speaking');
@@ -1661,10 +1665,24 @@
           body: JSON.stringify({ slug: ACTIVE_SLUG, prompt: prompt })
         });
         const data = await res.json();
+        hideTerminalLoader();
         if (!data.success) {
-          hideTerminalLoader();
           logTerminal(`Error: ${data.error}`, 'error');
           ToastManager.show(data.error || 'Failed to modify game', 'error');
+        } else {
+          logTerminal(`[PASS] ${data.summary || 'Game updated live.'}`, 'pass');
+          if (data.content) {
+            fileContents = data.content;
+            if (activeTab !== 'terminal') {
+              displayCodeFile(activeTab);
+              const disp = document.getElementById('codeDisplay');
+              disp.classList.remove('flash');
+              void disp.offsetWidth;
+              disp.classList.add('flash');
+            }
+          }
+          restartPreview();
+          ToastManager.show('Game updated live', 'success');
         }
       } catch (err) {
         hideTerminalLoader();

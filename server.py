@@ -455,6 +455,10 @@ async def api_project_files(request: web.Request) -> web.Response:
         return web.json_response({"success": False, "error": "Project not found or access denied."}, status=404)
         
     files = projects_manager.get_project_all_files(proj["user_id"], slug)
+    if not files.get("index.html"):
+        creator_name = proj.get("username") or (user.get("username") if user else "creator")
+        projects_manager.create_starter_game(proj["user_id"], creator_name, slug, proj.get("title", slug))
+        files = projects_manager.get_project_all_files(proj["user_id"], slug)
     return web.json_response({"success": True, "slug": slug, "files": files})
 
 async def api_community_projects(request: web.Request) -> web.Response:
@@ -534,6 +538,11 @@ async def handle_game_asset(request: web.Request) -> web.Response:
     if target.is_symlink() or os.path.islink(str(target)):
         return web.Response(text="Access denied: symlinks forbidden", status=403)
         
+    if not target.exists() or not target.is_file():
+        if safe_name in ["index.html", "style.css", "app.js"]:
+            projects_manager.create_starter_game(proj["user_id"], proj.get("username", username), slug, proj.get("title", slug))
+            target = (pdir / safe_name).resolve()
+            
     if not target.exists() or not target.is_file():
         return web.Response(text="File not found", status=404)
         
@@ -879,6 +888,7 @@ async def _live_receive_loop(ws: web.WebSocketResponse, slug: str, session, api_
                                 await broadcast_project_log(slug, f"[ARCHITECT] Gemini Live invoked builder: \"{instruction}\"", "info")
                                 if not ws.closed:
                                     await ws.send_json({"type": "live_status", "status": "thinking"})
+                                    await ws.send_json({"type": "show_loader", "text": f"Antigravity is coding: {instruction[:60]}..."})
 
                                 async def _cb(step_type, msg_text):
                                     await broadcast_project_log(slug, msg_text, step_type)
@@ -900,6 +910,9 @@ async def _live_receive_loop(ws: web.WebSocketResponse, slug: str, session, api_
                                     await session.send(input=tool_resp)
                                 except Exception as e:
                                     print(f"[LIVE TOOL SEND ERROR] {e}")
+
+                                if not ws.closed:
+                                    await ws.send_json({"type": "hide_loader"})
 
                                 if res.get("success"):
                                     await broadcast_project_update(slug, {
