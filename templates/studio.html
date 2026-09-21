@@ -746,15 +746,15 @@
     </div>
 
     <!-- Push-to-Talk Button -->
-    <button type="button" class="ptt-trigger-btn" id="pttBtn">
+    <button type="button" class="ptt-trigger-btn" id="pttBtn" style="display: none;">
       <span id="micIcon"></span>
       <span id="pttLabel">Hold Space to Talk</span>
     </button>
 
     <!-- Voice Mode Select -->
     <select class="voice-mode-select" id="voiceModeSelect" onchange="handleVoiceModeChange()">
+      <option value="continuous" selected>Continuous Voice</option>
       <option value="ptt">Push-to-Talk</option>
-      <option value="continuous">Continuous Voice</option>
     </select>
 
     <!-- Command Input -->
@@ -921,7 +921,7 @@
 
     // Live Voice State
     let isLiveConnected = false;
-    let voiceMode = 'ptt'; // 'ptt' or 'continuous'
+    let voiceMode = 'continuous'; // 'continuous' (default) or 'ptt'
     let liveAudioPlayer = null;
     let micAudioContext = null;
     let micStream = null;
@@ -1273,9 +1273,16 @@
             } else if (data.type === 'live_status') {
               if (data.status === 'connected') {
                 isLiveConnected = true;
-                setLiveStatus(data.model || 'Gemini 3.8 Live Ready', 'online');
                 updateLiveButton(true);
-                logTerminal(`[LIVE_AI] Connected to ${data.model || 'Gemini 3.8 Live Extended Thinking (High)'}. Speak or hold Space to talk.`, 'live');
+                if (voiceMode === 'continuous') {
+                  isListening = true;
+                  setLiveStatus('Continuous Voice Active', 'listening');
+                  animateWaveform('listening');
+                  logTerminal(`[LIVE_AI] Connected to ${data.model || 'Gemini 3.8 Live Extended Thinking (High)'}. Continuous voice active. Speak naturally.`, 'live');
+                } else {
+                  setLiveStatus(data.model || 'Gemini 3.8 Live Ready', 'online');
+                  logTerminal(`[LIVE_AI] Connected to ${data.model || 'Gemini 3.8 Live Extended Thinking (High)'}. Hold Space to talk.`, 'live');
+                }
                 ToastManager.show('Gemini 3.8 Live Connected', 'success');
               } else if (data.status === 'connecting') {
                 setLiveStatus(data.message || 'Connecting to Gemini 3.8 Live...', 'connecting');
@@ -1449,8 +1456,8 @@
         micProcessor = micAudioContext.createScriptProcessor(4096, 1, 1);
 
         micProcessor.onaudioprocess = (e) => {
-          if (!isListening && (voiceMode !== 'continuous' || isSpeaking)) return;
           if (!isLiveConnected || !ws || ws.readyState !== WebSocket.OPEN) return;
+          if (voiceMode === 'ptt' && !isListening) return;
 
           const inputData = e.inputBuffer.getChannelData(0);
 
@@ -1524,17 +1531,17 @@
 
       if (voiceMode === 'continuous') {
         pttBtn.style.display = 'none';
+        isListening = true;
         if (isLiveConnected) {
           startMicrophone().then(ok => {
             if (ok) {
-              isListening = true;
               setLiveStatus('Continuous Voice Active', 'listening');
               animateWaveform('listening');
             }
           });
         }
       } else {
-        pttBtn.style.display = 'flex';
+        pttBtn.style.display = 'inline-flex';
         isListening = false;
         stopWaveform();
         if (isLiveConnected) setLiveStatus('Live Ready (Hold Space to Talk)', 'online');
@@ -1546,7 +1553,7 @@
     const pttBtn = document.getElementById('pttBtn');
 
     async function activatePTT() {
-      if (isPTTActive) return;
+      if (isPTTActive || voiceMode !== 'ptt') return;
 
       if (!isLiveConnected) {
         ToastManager.show('Connecting Live AI first... please hold on', 'info');
@@ -1555,6 +1562,7 @@
       }
 
       isPTTActive = true;
+      isListening = true;
       pttBtn.classList.add('recording');
       document.getElementById('pttLabel').textContent = 'Listening... (Release)';
 
@@ -1562,14 +1570,13 @@
 
       const ok = await startMicrophone();
       if (ok && isPTTActive) {
-        isListening = true;
         setLiveStatus('Listening to you...', 'listening');
         animateWaveform('listening');
       }
     }
 
     function deactivatePTT() {
-      if (!isPTTActive) return;
+      if (!isPTTActive || voiceMode !== 'ptt') return;
       isPTTActive = false;
       isListening = false;
       pttBtn.classList.remove('recording');

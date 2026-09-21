@@ -455,10 +455,6 @@ async def api_project_files(request: web.Request) -> web.Response:
         return web.json_response({"success": False, "error": "Project not found or access denied."}, status=404)
         
     files = projects_manager.get_project_all_files(proj["user_id"], slug)
-    if not files.get("index.html"):
-        creator_name = proj.get("username") or (user.get("username") if user else "creator")
-        projects_manager.create_starter_game(proj["user_id"], creator_name, slug, proj.get("title", slug))
-        files = projects_manager.get_project_all_files(proj["user_id"], slug)
     return web.json_response({"success": True, "slug": slug, "files": files})
 
 async def api_community_projects(request: web.Request) -> web.Response:
@@ -538,11 +534,6 @@ async def handle_game_asset(request: web.Request) -> web.Response:
     if target.is_symlink() or os.path.islink(str(target)):
         return web.Response(text="Access denied: symlinks forbidden", status=403)
         
-    if not target.exists() or not target.is_file():
-        if safe_name in ["index.html", "style.css", "app.js"]:
-            projects_manager.create_starter_game(proj["user_id"], proj.get("username", username), slug, proj.get("title", slug))
-            target = (pdir / safe_name).resolve()
-            
     if not target.exists() or not target.is_file():
         return web.Response(text="File not found", status=404)
         
@@ -827,6 +818,45 @@ Current Game Repository Files:
             })
         await broadcast_project_log(slug, f"[LIVE_ERROR] {err_msg[:140]}", "error")
 
+async def _run_antigravity_builder(slug: str, session_user: dict, api_key: str, instruction: str, ws: web.WebSocketResponse, session=None):
+    """
+    Executes Antigravity code generation in a background task so the Gemini Live voice call
+    and receive loop stay unblocked. Creator can continue speaking with Gemini Live while coding runs.
+    """
+    try:
+        if not ws.closed:
+            await ws.send_json({"type": "show_loader", "text": f"Antigravity is coding: {instruction[:60]}..."})
+
+        async def _cb(step_type, msg_text):
+            await broadcast_project_log(slug, msg_text, step_type)
+
+        res = await ai_engine.process_code_request(
+            api_key, session_user["id"], session_user["username"], slug, instruction, log_callback=_cb
+        )
+
+        if not ws.closed:
+            await ws.send_json({"type": "hide_loader"})
+
+        if res.get("success"):
+            await broadcast_project_update(slug, {
+                "type": "code_update",
+                "summary": res["summary"],
+                "content": res["content"],
+                "timestamp": int(time.time())
+            })
+            await broadcast_project_log(slug, f"[PASS] {res['summary']}", "pass")
+        else:
+            err_msg = res.get("error", "Code build failed")
+            await broadcast_project_log(slug, f"[FAIL] Antigravity build failed: {err_msg}", "fail")
+    except Exception as e:
+        print(f"[ANTIGRAVITY BUILDER ERROR] {e}")
+        await broadcast_project_log(slug, f"[FAIL] Antigravity error: {e}", "fail")
+        if not ws.closed:
+            try:
+                await ws.send_json({"type": "hide_loader"})
+            except Exception:
+                pass
+
 async def _live_receive_loop(ws: web.WebSocketResponse, slug: str, session, api_key: str, session_user: dict):
     """Background listener for streaming audio, thoughts, and tool calls from Gemini Live across all turns."""
     try:
@@ -887,22 +917,17 @@ async def _live_receive_loop(ws: web.WebSocketResponse, slug: str, session, api_
                                 instruction = fc.args.get("instruction", "").strip()
                                 await broadcast_project_log(slug, f"[ARCHITECT] Gemini Live invoked builder: \"{instruction}\"", "info")
                                 if not ws.closed:
-                                    await ws.send_json({"type": "live_status", "status": "thinking"})
                                     await ws.send_json({"type": "show_loader", "text": f"Antigravity is coding: {instruction[:60]}..."})
 
-                                async def _cb(step_type, msg_text):
-                                    await broadcast_project_log(slug, msg_text, step_type)
-
-                                res = await ai_engine.process_code_request(
-                                    api_key, session_user["id"], session_user["username"], slug, instruction, log_callback=_cb
-                                )
-
+                                # Send immediate tool response so Gemini Live voice loop stays unblocked
                                 tool_resp = types.LiveClientToolResponse(
                                     function_responses=[
                                         types.FunctionResponse(
                                             name="modify_game_code",
                                             id=fc.id,
-                                            response={"result": "Game files updated successfully" if res.get("success") else res.get("error", "Failed to update")}
+                                            response={
+                                                "result": f"Antigravity engine has received prompt: '{instruction}' and is now compiling the game files in the background. Tell the user you started building it, and continue talking with them about gameplay mechanics, graphics, or further ideas while it builds."
+                                            }
                                         )
                                     ]
                                 )
@@ -911,18 +936,8 @@ async def _live_receive_loop(ws: web.WebSocketResponse, slug: str, session, api_
                                 except Exception as e:
                                     print(f"[LIVE TOOL SEND ERROR] {e}")
 
-                                if not ws.closed:
-                                    await ws.send_json({"type": "hide_loader"})
-
-                                if res.get("success"):
-                                    await broadcast_project_update(slug, {
-                                        "type": "code_update",
-                                        "summary": res["summary"],
-                                        "content": res["content"],
-                                        "timestamp": int(time.time())
-                                    })
-                                if not ws.closed:
-                                    await ws.send_json({"type": "live_status", "status": "connected"})
+                                # Run code generation in background without freezing voice streaming
+                                asyncio.create_task(_run_antigravity_builder(slug, session_user, api_key, instruction, ws, session))
             except asyncio.CancelledError:
                 break
             except Exception as turn_err:
