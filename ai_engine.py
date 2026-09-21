@@ -129,27 +129,23 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
         def _call_gemini():
             client = genai.Client(api_key=cleaned_key)
             last_err = None
-            # Multi-model waterfall to absorb free-tier 20 RPD caps:
-            # 1. gemini-3.8-flash (20 RPD) -> primary
-            # 2. gemini-3.7-flash (20 RPD) -> fallback 1
-            # Multi-model waterfall to absorb free-tier 20 RPD caps:
-            # 1. gemini-2.5-flash (Production speed & quality)
-            # 2. gemini-2.0-flash (High speed fallback)
-            # 3. gemini-1.5-flash (Standard fallback)
-            # 4. gemini-3.8-flash (Preview)
-            # 5. gemini-3.7-flash (Preview)
-            # 6. gemini-3.5-flash (Preview)
-            # 7. gemini-3.5-flash-lite / 3.1-flash-lite (High RPD fallback)
+            # Multi-model waterfall strictly configured to user specification:
+            # 1. Gemini 3.8 Flash
+            # 2. Gemini 3.7 Flash
+            # 3. Gemini 3.6 Flash
+            # 4. gemini-3.5-flash
+            # 5. gemini-3.1-flash-lite
+            # 6. gemini-3.5-flash-lite
+            # (with gemini-2.5-flash and gemini-2.0-flash as resilient emergency fallbacks)
             for model_name in [
-                "gemini-2.5-flash",
-                "gemini-2.0-flash",
-                "gemini-1.5-flash",
                 "gemini-3.8-flash",
                 "gemini-3.7-flash",
                 "gemini-3.6-flash",
                 "gemini-3.5-flash",
+                "gemini-3.1-flash-lite",
                 "gemini-3.5-flash-lite",
-                "gemini-3.1-flash-lite"
+                "gemini-2.5-flash",
+                "gemini-2.0-flash"
             ]:
                 try:
                     cfg_kwargs = {
@@ -182,10 +178,10 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
             raise RuntimeError("All models in the generation waterfall failed.")
             
         try:
-            # 180 second timeout on AI code generation across the multi-model waterfall
-            raw_response = await asyncio.wait_for(asyncio.to_thread(_call_gemini), timeout=180.0)
+            # 10,000 second timeout on AI code generation allowing deep reasoning & debugging
+            raw_response = await asyncio.wait_for(asyncio.to_thread(_call_gemini), timeout=10000.0)
         except asyncio.TimeoutError:
-            err_msg = "Google AI Studio request timed out after 180 seconds."
+            err_msg = "Google AI Studio request timed out after 10000 seconds."
             fail_step = f"[FAIL] {err_msg}"
             projects_manager.write_build_log(user_id_int, safe_slug, "FAIL", fail_step)
             if log_callback:
