@@ -1,4 +1,5 @@
 import os
+import re
 import io
 import json
 import time
@@ -527,26 +528,34 @@ async def handle_game_asset(request: web.Request) -> web.Response:
     if not proj:
         return web.Response(text="Game not found", status=404)
         
-    # Strictly validate filename to prevent path traversal
-    safe_name = os.path.basename(filename)
-    if not safe_name or ".." in safe_name or "/" in filename or "\\" in filename:
-        safe_name = "index.html"
-        
+    clean_path = filename.replace("\\", "/").strip().lstrip("/")
+    if not clean_path:
+        clean_path = "index.html"
+
+    # Path traversal check
+    if any(p in clean_path for p in ["..", "%", "\0", ":"]):
+        return web.Response(text="Access denied: path traversal detected", status=403)
+
+    parts = clean_path.split("/")
+    if any(p in ("..", ".", "") or not re.match(r'^[a-zA-Z0-9_.\-]+$', p) for p in parts):
+        return web.Response(text="Access denied: invalid path components", status=403)
+
+    safe_name = parts[-1]
     # Block protected files, build logs, hidden files, and disallowed extensions
-    if safe_name.startswith(".") or safe_name in projects_manager.PROTECTED_FILES:
-        return web.Response(text="Access denied", status=403)
+    if safe_name.startswith(".") or safe_name in projects_manager.PROTECTED_FILES or any(p in projects_manager.PROTECTED_FILES for p in parts):
+        return web.Response(text="Access denied: protected file", status=403)
 
     ext = Path(safe_name).suffix.lower()
-    if ext in projects_manager.DISALLOWED_EXTENSIONS:
-        return web.Response(text="Access denied", status=403)
+    if ext in projects_manager.DISALLOWED_EXTENSIONS or ext not in projects_manager.ALLOWED_GAME_EXTENSIONS:
+        return web.Response(text="Access denied: disallowed extension", status=403)
         
     pdir = projects_manager.get_user_project_dir(proj["user_id"], slug).resolve()
-    target = (pdir / safe_name).resolve()
+    target = (pdir / clean_path).resolve()
     
     try:
         target.relative_to(pdir)
     except ValueError:
-        return web.Response(text="Access denied", status=403)
+        return web.Response(text="Access denied: target outside project", status=403)
         
     if target.is_symlink() or os.path.islink(str(target)):
         return web.Response(text="Access denied: symlinks forbidden", status=403)
@@ -554,20 +563,30 @@ async def handle_game_asset(request: web.Request) -> web.Response:
     if not target.exists() or not target.is_file():
         return web.Response(text="File not found", status=404)
         
-    content_type = "text/html"
-    charset = "utf-8"
-    if safe_name.endswith(".css"): content_type = "text/css"
-    elif safe_name.endswith(".js"): content_type = "application/javascript"
-    elif safe_name.endswith(".json"): content_type = "application/json"
-    elif safe_name.endswith(".png"): content_type = "image/png"; charset = None
-    elif safe_name.endswith((".jpg", ".jpeg")): content_type = "image/jpeg"; charset = None
+    content_type = "application/octet-stream"
+    charset = None
+    if safe_name.endswith(".html"): content_type = "text/html"; charset = "utf-8"
+    elif safe_name.endswith(".css"): content_type = "text/css"; charset = "utf-8"
+    elif safe_name.endswith(".js"): content_type = "application/javascript"; charset = "utf-8"
+    elif safe_name.endswith(".json"): content_type = "application/json"; charset = "utf-8"
+    elif safe_name.endswith(".txt"): content_type = "text/plain"; charset = "utf-8"
+    elif safe_name.endswith(".csv"): content_type = "text/csv"; charset = "utf-8"
+    elif safe_name.endswith(".png"): content_type = "image/png"
+    elif safe_name.endswith((".jpg", ".jpeg")): content_type = "image/jpeg"
+    elif safe_name.endswith(".webp"): content_type = "image/webp"
     elif safe_name.endswith(".svg"): content_type = "image/svg+xml"; charset = "utf-8"
+    elif safe_name.endswith(".mp3"): content_type = "audio/mpeg"
+    elif safe_name.endswith(".wav"): content_type = "audio/wav"
+    elif safe_name.endswith(".ogg"): content_type = "audio/ogg"
+    elif safe_name.endswith((".gltf", ".glb")): content_type = "model/gltf-binary" if safe_name.endswith(".glb") else "model/gltf+json"
+    elif safe_name.endswith(".obj"): content_type = "text/plain"; charset = "utf-8"
+    elif safe_name.endswith(".dae"): content_type = "application/xml"; charset = "utf-8"
     
     body_bytes = target.read_bytes()
     is_iframe = (request.headers.get("Sec-Fetch-Dest") == "iframe") or (request.query.get("embed") == "1") or (request.query.get("raw") == "1")
     
     # If viewed directly in browser by owner, inject sleek "Edit in Studio" button
-    if safe_name == "index.html" and not is_iframe:
+    if clean_path == "index.html" and not is_iframe:
         session_user = await get_session_user(request)
         is_owner = (session_user is not None and (session_user.get("id") == proj.get("user_id") or session_user.get("username", "").lower() == username))
         
@@ -749,70 +768,54 @@ async def start_gemini_live_session(ws: web.WebSocketResponse, slug: str, sessio
             })
         await broadcast_project_log(slug, "[LIVE] Connecting to Gemini 3.8 Live Extended Thinking (High)...", "live")
 
-        # Read existing project files for immediate context
-        index_html = projects_manager.read_project_file(user_id, slug, "index.html")
-        style_css = projects_manager.read_project_file(user_id, slug, "style.css")
-        app_js = projects_manager.read_project_file(user_id, slug, "app.js")
+        # Read existing project files dynamically for immediate context
+        repo_files = projects_manager.list_project_files(user_id, slug)
+        files_context_parts = []
+        text_exts = {".html", ".css", ".js", ".json", ".svg", ".txt", ".csv"}
+        for rf in repo_files:
+            if Path(rf).suffix.lower() in text_exts:
+                try:
+                    fcontent = projects_manager.read_project_file(user_id, slug, rf)
+                    files_context_parts.append(f"--- {rf} ---\n{fcontent[:6000]}")
+                except Exception:
+                    pass
+        files_context_str = "\n".join(files_context_parts) if files_context_parts else "No files created yet."
 
-        live_sys_prompt = f"""You are Gemini 3.8 Live Extended Thinking on High, an interactive AI Game Architect and Pair-Programming Co-pilot inside Yulya Studio.
-Your thinking mode is set to Extended Thinking on High. You are having an ongoing real-time voice call with the creator @{session_user.get('username', 'creator')} building an HTML5 Canvas web game named '{slug}'.
+        creator_name = session_user.get('username', 'creator')
+        live_sys_prompt = f"""You are Gemini 3.8 Live Extended Thinking on High, an interactive AI Game Architect and pair-programming co-pilot inside Yulya Studio. You are speaking in real-time to the creator @{creator_name} who is building an HTML5 Canvas web game named '{slug}'. 
 
-WORKFLOW & DESIGN GUIDELINES:
+**Workflow & Guidelines:**
 
-1. THE "GRILL ME" INTERACTIVE DESIGN INTERVIEW:
-- When the creator describes an idea, DO NOT build immediately.
-- "Grill" the creator with smart, creative, and specific questions to thoroughly flesh out the game.
-- Ask about:
-  * Core gameplay mechanics, win/loss rules, and scoring
-  * Art style and visual aesthetic (always provide 2-3 clear options to choose from, e.g. Neon Cyberpunk vs Retro 8-bit Pixel vs Minimalist Pastel)
-  * Control scheme (e.g. Arrow keys, WASD, Mouse aim, Mobile touch)
-  * Enemy types, difficulty progression, hazards, and power-ups
-- Ask 1 or 2 focused questions at a time with concrete options so the creator can easily reply.
-- Dig into the details until you have a complete, polished game plan.
+1. **Design Interview:** When the creator describes an idea, ask smart, specific questions to flesh out the game. Focus on mechanics, aesthetics, controls, enemies, power-ups, scoring, etc. Always offer multiple clear options (e.g. “Do you want Neon Cyberpunk visuals or retro pixel art?”). Ask 1-2 questions at a time until the game plan is complete.
 
-2. DRAFTING THE PROMPT & ASKING PERMISSION (MANDATORY BEFORE BUILDING):
-- When you and the creator have fleshed out the entire idea and are ready to build:
-  * Ask the creator if they would like you to draft the build prompt for Antigravity.
-  * Call your tool `draft_prompt_to_input(prompt=...)` with the comprehensive, detailed engineering specification you designed.
-  * Tell the creator: "I've drafted the complete build prompt in your command box at the bottom of the screen! You can review it, edit it if you want, and press Enter to send it — or just say 'send it' and I'll send it directly to Antigravity for you."
-  * If the creator asks "Can you read the prompt to me?", read the full prompt aloud in your voice and ask for their confirmation!
+2. **Drafting Build Prompt:** Once the game idea is fully specified, ask the creator if you should draft the engineering prompt for Antigravity. If they agree:
+   - Execute the tool `draft_prompt_to_input(prompt=...)` with a detailed build specification you create. Include all game requirements and architecture decisions (not just partial instructions).
+   - Tell the creator: “I’ve drafted the complete build prompt in your command box. You can review and edit it or say ‘send it’ to run it on Antigravity.”
+   - If the creator asks, you **read the full prompt aloud** and ask for confirmation.
 
-3. SENDING TO ANTIGRAVITY CODING ENGINE:
-- When the creator confirms verbally ("send it", "just send it", "go ahead and build", "yes build it"):
-  * Call your tool `send_prompt_to_antigravity(instruction=...)`.
-  * Tell the creator you sent it to Antigravity and it's compiling now!
-- (Note: The creator may also press Enter on the command box themselves to launch it.)
+3. **Sending to Antigravity:** When the creator confirms (by voice “send it” or pressing Enter):
+   - Call `send_prompt_to_antigravity(instruction=...)` with the final prompt.
+   - Announce: “Sending your build prompt to the code engine now! It’s compiling the game in the background.” 
 
-4. CHATTING WHILE BUILDING (NON-BLOCKING):
-- While Antigravity is compiling code in the background, you and the creator can continue talking freely!
-- Brainstorm extra features, power-ups, audio ideas, visual effects, or future ideas to add once the build finishes.
+4. **Chat While Building:** After sending, you can continue talking naturally. Brainstorm extra features, future ideas, or explain design choices. This does not interrupt the background build.
 
-5. TESTING, SCREENSHARING & ITERATIVE POLISH:
-- When Antigravity completes the build, you will receive a notification.
-- Congratulate the creator and invite them to test playing the game right in the live preview window!
-- Encourage them to click the "Screenshare" button so you can watch their screen live.
-- When they screenshare and play, observe their canvas, critique how it feels and looks, and discuss improvements.
-- When they want to add new features or fixes, repeat the process: draft the new prompt into their input box with `draft_prompt_to_input`, ask permission, and build!
+5. **Testing & Iteration:** When Antigravity finishes building, you receive a notification. Congratulate the creator, invite them to test the game in the preview, and suggest they click **Screenshare** so you can watch them play. Observe and provide feedback. If they want changes, repeat the process: `draft_prompt_to_input(...)`, ask, then `send_prompt_to_antigravity(...)`.
 
-6. CHAT WINDOW TRANSCRIPTS (CRITICAL):
-- The creator is looking at an on-screen Chat tab while listening to you.
-- On EVERY turn when you speak (greeting them, asking questions, explaining options, discussing game mechanics), ALWAYS execute the `post_chat_message(message=...)` tool with the text of what you are saying to them!
-- This guarantees your message is simultaneously displayed on their Chat screen in clean readable markdown while you speak aloud in voice!
+6. **Transcript Logging:** The creator sees a live chat transcript. **Every time you speak in voice**, also call `post_chat_message(message=...)` with your spoken text so it appears in their chat window in markdown. This keeps the audio and text in sync.
 
-TOOLS:
-- `post_chat_message(message: str)`: Posts your response as formatted markdown text into the creator's Chat screen so they can read along while listening to your voice.
-- `draft_prompt_to_input(prompt: str)`: Populates the creator's on-screen command input box with the drafted Antigravity build prompt.
-- `send_prompt_to_antigravity(instruction: str)`: Hands off the approved instruction to Antigravity to build/compile the game.
+**Permitted Scope:**
 
-Keep your spoken voice responses conversational, energetic, clear, and natural. Keep spoken sentences punchy and engaging.
+- You *know* the current code files (HTML, CSS, JS) but you cannot edit them yourself. You only instruct and design.
+- Remember: Antigravity can now create multiple files in the project folder (scripts, assets, etc.). Feel free to mention splitting code into modules or adding assets.
+- **Do NOT** try to access any file outside the game directory. You have **no direct file or database access**. Use the tools provided.
+
+**Tools Available:**
+- `post_chat_message(message: str)`
+- `draft_prompt_to_input(prompt: str)`
+- `send_prompt_to_antigravity(instruction: str)`
 
 Current Game Repository Files:
---- index.html ---
-{index_html[:6000]}
---- style.css ---
-{style_css[:4000]}
---- app.js ---
-{app_js[:8000]}
+{files_context_str}
 """
 
         architect_tools = types.Tool(

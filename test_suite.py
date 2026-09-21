@@ -343,7 +343,9 @@ async def run_tests():
             "../game-beta/app.js",
             "/etc/passwd",
             "C:\\Windows\\win.ini",
-            "sub/file.js"
+            "sub/../../file.js",
+            "js/../../../etc/passwd",
+            "sub/.."
         ]
         for bad_fn in bad_filenames:
             caught = False
@@ -352,6 +354,29 @@ async def run_tests():
             except (PermissionError, ValueError):
                 caught = True
             assert_true(caught, f"Filename traversal blocked: {bad_fn}")
+
+        # Multi-file and subdirectory support tests (relaxed per Section 2)
+        nested_fn = "js/engine.js"
+        written_nested = projects_manager.write_project_file(isolation_user_id, game_a, nested_fn, "console.log('engine');")
+        assert_true(written_nested == nested_fn, f"Allowed nested file creation: {nested_fn}")
+        read_nested = projects_manager.read_project_file(isolation_user_id, game_a, nested_fn)
+        assert_true("console.log('engine');" in read_nested, "Read nested file successfully")
+
+        # Multi-file asset support tests (.json, .svg, 3D .gltf/.obj)
+        asset_fn = "assets/sprite.svg"
+        written_asset = projects_manager.write_project_file(isolation_user_id, game_a, asset_fn, "<svg></svg>")
+        assert_true(written_asset == asset_fn, f"Allowed asset file creation: {asset_fn}")
+        read_asset = projects_manager.read_project_file(isolation_user_id, game_a, asset_fn)
+        assert_true("<svg></svg>" in read_asset, "Read asset file successfully")
+
+        # Check list_project_files returns nested paths
+        all_game_files = projects_manager.list_project_files(isolation_user_id, game_a)
+        assert_true(nested_fn in all_game_files and asset_fn in all_game_files, f"list_project_files includes nested subpaths: {all_game_files}")
+
+        # Media & 3D model extensions tests (.gltf, .glb, .obj, .mp3, .json)
+        for media_ext in ["model.gltf", "mesh.glb", "tree.obj", "sound.mp3", "level.json"]:
+            written_media = projects_manager.write_project_file(isolation_user_id, game_a, f"assets/{media_ext}", "data")
+            assert_true(written_media == f"assets/{media_ext}", f"Allowed media/3D extension: {media_ext}")
 
         # Prohibited executable / system file extension tests
         forbidden_extensions = ["payload.py", "script.sh", "run.bat", ".env", "cmd.cmd", "app.exe"]

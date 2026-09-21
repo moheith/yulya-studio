@@ -248,9 +248,11 @@
     <div class="stream-panel">
       <div class="stream-panel-header">
         <div class="tabs-group">
-          <button class="tab-btn active" id="tabApp" onclick="switchTab('app.js')">app.js</button>
-          <button class="tab-btn" id="tabIndex" onclick="switchTab('index.html')">index.html</button>
-          <button class="tab-btn" id="tabStyle" onclick="switchTab('style.css')">style.css</button>
+          <div id="dynamicFileTabs" style="display: contents;">
+            <button class="tab-btn active" id="tabApp" data-file="app.js" onclick="switchTab('app.js')">app.js</button>
+            <button class="tab-btn" id="tabIndex" data-file="index.html" onclick="switchTab('index.html')">index.html</button>
+            <button class="tab-btn" id="tabStyle" data-file="style.css" onclick="switchTab('style.css')">style.css</button>
+          </div>
           <button class="tab-btn" id="tabActivity" onclick="switchTab('activity')">Activity Feed</button>
         </div>
 
@@ -327,6 +329,29 @@
       'style.css': '/* Loading style.css... */'
     };
 
+    function renderFileTabs() {
+      const container = document.getElementById('dynamicFileTabs');
+      if (!container) return;
+      const files = Object.keys(fileContents);
+      if (files.length === 0) return;
+
+      const priority = ["app.js", "index.html", "style.css"];
+      const sortedFiles = [...files].sort((a, b) => {
+        const idxA = priority.indexOf(a);
+        const idxB = priority.indexOf(b);
+        if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+        if (idxA !== -1) return -1;
+        if (idxB !== -1) return 1;
+        return a.localeCompare(b);
+      });
+
+      container.innerHTML = sortedFiles.map(fname => {
+        const isActive = (activeTab === fname) ? 'active' : '';
+        const escaped = fname.replace(/'/g, "\\'");
+        return `<button class="tab-btn ${isActive}" data-file="${fname}" title="${fname}" onclick="switchTab('${escaped}')">${fname}</button>`;
+      }).join('');
+    }
+
     function switchTab(tabName) {
       activeTab = tabName;
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -336,13 +361,18 @@
       const copyBtn = document.getElementById('copyCodeBtn');
 
       if (tabName === 'activity') {
-        document.getElementById('tabActivity').classList.add('active');
+        const btn = document.getElementById('tabActivity');
+        if (btn) btn.classList.add('active');
         codeWrap.style.display = 'none';
         actFeed.classList.add('active');
         copyBtn.style.display = 'none';
       } else {
-        const btnId = tabName === 'app.js' ? 'tabApp' : tabName === 'index.html' ? 'tabIndex' : 'tabStyle';
-        document.getElementById(btnId).classList.add('active');
+        const selector = `.tab-btn[data-file="${tabName.replace(/"/g, '\\"')}"]`;
+        const btn = document.querySelector(selector) || 
+                    (tabName === 'app.js' ? document.getElementById('tabApp') : 
+                     tabName === 'index.html' ? document.getElementById('tabIndex') : 
+                     tabName === 'style.css' ? document.getElementById('tabStyle') : null);
+        if (btn) btn.classList.add('active');
         codeWrap.style.display = 'flex';
         actFeed.classList.remove('active');
         copyBtn.style.display = 'inline-flex';
@@ -375,6 +405,7 @@
         const data = await res.json();
         if (data.success && data.files) {
           fileContents = data.files;
+          renderFileTabs();
           if (activeTab !== 'activity') displayCodeFile(activeTab);
         }
       } catch (err) {
@@ -463,6 +494,7 @@
 
             if (data.content) {
               fileContents = data.content;
+              renderFileTabs();
               if (activeTab !== 'activity') {
                 displayCodeFile(activeTab);
                 const disp = document.getElementById('codeDisplay');

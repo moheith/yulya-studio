@@ -23,9 +23,9 @@ SESSION_SECRET = os.getenv("SESSION_SECRET", "yulya_studio_secret_key_2026_super
 COOKIE_NAME = "yulya_studio_session"
 COOKIE_SECURE = BASE_URL.startswith("https")
 
-# File size limits (Section 31)
-MAX_FILE_SIZE = 512 * 1024       # 512 KB per file
-MAX_PROJECT_SIZE = 2 * 1024 * 1024  # 2 MB total project size
+# File size limits (Section 31 & Multi-File Architecture)
+MAX_FILE_SIZE = 5 * 1024 * 1024       # 5 MB per file
+MAX_PROJECT_SIZE = 20 * 1024 * 1024   # 20 MB total project size
 
 # Rate limits: (max_requests, window_seconds) (Section 30)
 RATE_LIMIT_MODIFY = (10, 60)

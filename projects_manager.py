@@ -47,7 +47,8 @@ DISALLOWED_EXTENSIONS = {
 
 ALLOWED_GAME_EXTENSIONS = {
     ".html", ".css", ".js", ".json", ".svg", ".txt", ".csv", ".tsv", ".xml",
-    ".png", ".jpg", ".jpeg", ".webp", ".mp3", ".wav", ".ogg"
+    ".png", ".jpg", ".jpeg", ".webp", ".mp3", ".wav", ".ogg",
+    ".obj", ".gltf", ".glb", ".dae"
 }
 
 def get_user_project_dir(user_id: int, slug: str) -> Path:
@@ -88,9 +89,8 @@ def get_user_project_dir(user_id: int, slug: str) -> Path:
         raise PermissionError("Path traversal attempt detected: path escapes project repository.")
         
     if project_dir == user_root or project_dir == base_root:
-        raise PermissionError("Invalid project directory: cannot point to repository root.")
+        raise PermissionError("Cannot access root directory.")
         
-    project_dir.mkdir(parents=True, exist_ok=True)
     return project_dir
 
 def get_project_size(project_dir: Path) -> int:
@@ -106,38 +106,40 @@ def get_project_size(project_dir: Path) -> int:
 def write_project_file(user_id: int, slug: str, filename: str, content: str) -> str:
     """
     Writes a project file enforcing strict path isolation, size limits, and security rules.
-    Guarantees that files cannot escape data/projects/{user_id}/{slug}/ or touch profiles/server files.
+    Supports subfolders (e.g. js/engine.js, assets/sprite.svg) while guaranteeing that
+    files cannot escape data/projects/{user_id}/{slug}/ or touch profiles/server files.
     """
     if not filename or not isinstance(filename, str):
         raise ValueError("Filename is required.")
         
-    if any(p in filename for p in ["..", "/", "\\", "%", "\0", ":"]):
+    clean_path = filename.replace("\\", "/").strip().lstrip("/")
+    if not clean_path:
+        raise ValueError("Filename is required.")
+        
+    if any(p in clean_path for p in ["..", "%", "\0", ":"]):
         raise PermissionError("Path traversal attempt detected in filename.")
         
-    # Sanitize file name
-    safe_name = os.path.basename(filename).strip()
-    if safe_name != filename:
-        raise PermissionError("Path traversal attempt detected: filename cannot contain path components.")
+    parts = clean_path.split("/")
+    if any(p in ("..", ".", "") or not re.match(r'^[a-zA-Z0-9_.\-]+$', p) for p in parts):
+        raise PermissionError("Path traversal attempt detected: invalid path components.")
         
-    if not re.match(r'^[a-zA-Z0-9_.\-]+$', safe_name) or '..' in safe_name:
-        raise ValueError(f"Invalid filename: {filename}")
-        
+    safe_name = parts[-1]
     # Block protected or system files
-    if safe_name.startswith(".") or safe_name in PROTECTED_FILES:
-        raise PermissionError(f"Access denied: cannot modify protected file '{safe_name}'.")
+    if safe_name.startswith(".") or safe_name in PROTECTED_FILES or any(p in PROTECTED_FILES for p in parts):
+        raise PermissionError(f"Access denied: cannot modify protected file '{clean_path}'.")
 
     # Block disallowed extensions
     ext = Path(safe_name).suffix.lower()
     if ext in DISALLOWED_EXTENSIONS or ext not in ALLOWED_GAME_EXTENSIONS:
-        raise PermissionError(f"Access denied: file '{safe_name}' has disallowed extension.")
+        raise PermissionError(f"Access denied: file '{clean_path}' has disallowed extension.")
         
-    # File size check (Section 31: 512 KB per file)
-    encoded = content.encode("utf-8")
+    # File size check
+    encoded = content.encode("utf-8") if isinstance(content, str) else content
     if len(encoded) > config.MAX_FILE_SIZE:
-        raise ValueError(f"File {safe_name} exceeds the maximum allowed file size of 512 KB.")
+        raise ValueError(f"File {clean_path} exceeds the maximum allowed file size.")
         
     pdir = get_user_project_dir(user_id, slug).resolve()
-    target = (pdir / safe_name).resolve()
+    target = (pdir / clean_path).resolve()
     
     # Traversal and symlink check
     try:
@@ -145,59 +147,58 @@ def write_project_file(user_id: int, slug: str, filename: str, content: str) -> 
     except ValueError:
         raise PermissionError("Path traversal detected: target is outside project directory.")
         
-    if target.is_symlink() or os.path.islink(str(pdir / safe_name)):
+    if target.is_symlink() or os.path.islink(str(target)):
         raise PermissionError("Symlinks are strictly forbidden.")
         
     # Security check against dangerous parent escape patterns
     if safe_name.endswith((".html", ".js")):
-        clean_content, warnings = sanitize_game_code(content)
+        clean_content, warnings = sanitize_game_code(content if isinstance(content, str) else content.decode("utf-8", errors="replace"))
         encoded = clean_content.encode("utf-8")
         
-    # Project total size check (Section 31: 2 MB total project size)
+    # Project total size check
     current_size = get_project_size(pdir)
     target_existing_size = target.stat().st_size if target.exists() else 0
     new_total_size = current_size - target_existing_size + len(encoded)
     if new_total_size > config.MAX_PROJECT_SIZE:
-        raise ValueError("Project total size exceeds the maximum allowed limit of 2 MB.")
+        raise ValueError("Project total size exceeds the maximum allowed limit.")
         
+    target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(encoded)
-    return safe_name
+    return clean_path
 
 def read_project_file(user_id: int, slug: str, filename: str) -> str:
     """
     Reads a file strictly from within the game project repository.
-    Rejects any traversal, symlink, or outside read.
+    Supports relative subpaths and rejects any traversal, symlink, or outside read.
     """
     if not filename or not isinstance(filename, str):
         return ""
         
-    if any(p in filename for p in ["..", "/", "\\", "%", "\0", ":"]):
+    clean_path = filename.replace("\\", "/").strip().lstrip("/")
+    if not clean_path or any(p in clean_path for p in ["..", "%", "\0", ":"]):
         raise PermissionError("Path traversal attempt detected in filename.")
         
-    safe_name = os.path.basename(filename).strip()
-    if safe_name != filename:
-        raise PermissionError("Path traversal attempt detected in filename.")
+    parts = clean_path.split("/")
+    if any(p in ("..", ".", "") or not re.match(r'^[a-zA-Z0-9_.\-]+$', p) for p in parts):
+        raise PermissionError("Invalid filename: invalid path components.")
         
-    if not re.match(r'^[a-zA-Z0-9_.\-]+$', safe_name) or '..' in safe_name:
-        raise PermissionError(f"Invalid filename: {filename}")
-        
-    # Strictly block reading protected files or hidden files
-    if safe_name in PROTECTED_FILES or safe_name.startswith("."):
-        raise PermissionError(f"Access denied: cannot read protected file '{safe_name}'.")
+    safe_name = parts[-1]
+    if safe_name in PROTECTED_FILES or safe_name.startswith(".") or any(p in PROTECTED_FILES for p in parts):
+        raise PermissionError(f"Access denied: cannot read protected file '{clean_path}'.")
 
     ext = Path(safe_name).suffix.lower()
     if ext in DISALLOWED_EXTENSIONS:
-        raise PermissionError(f"Access denied: cannot read file with disallowed extension '{safe_name}'.")
+        raise PermissionError(f"Access denied: cannot read file with disallowed extension '{clean_path}'.")
 
     pdir = get_user_project_dir(user_id, slug).resolve()
-    target = (pdir / safe_name).resolve()
+    target = (pdir / clean_path).resolve()
     
     try:
         target.relative_to(pdir)
     except ValueError:
         raise PermissionError("Path traversal detected in filename.")
         
-    if target.is_symlink() or os.path.islink(str(pdir / safe_name)):
+    if target.is_symlink() or os.path.islink(str(target)):
         raise PermissionError("Symlinks are strictly forbidden.")
         
     if not target.exists() or not target.is_file():
@@ -205,22 +206,22 @@ def read_project_file(user_id: int, slug: str, filename: str) -> str:
     return target.read_text(encoding="utf-8", errors="replace")
 
 def list_project_files(user_id: int, slug: str) -> list:
-    """Lists only valid game code files within the project repository."""
+    """Lists only valid game code files within the project repository recursively."""
     pdir = get_user_project_dir(user_id, slug).resolve()
     if not pdir.exists():
         return []
     files = []
-    for item in pdir.iterdir():
+    for item in pdir.rglob("*"):
         if item.is_file() and not item.is_symlink():
             try:
-                item.resolve().relative_to(pdir)
-                fname = item.name
-                if fname == "build.log" or fname.startswith(".") or fname in PROTECTED_FILES:
+                rel_path = item.resolve().relative_to(pdir).as_posix()
+                parts = rel_path.split("/")
+                if any(p.startswith(".") or p in PROTECTED_FILES for p in parts) or "build.log" in parts:
                     continue
-                ext = Path(fname).suffix.lower()
+                ext = item.suffix.lower()
                 if ext in DISALLOWED_EXTENSIONS or ext not in ALLOWED_GAME_EXTENSIONS:
                     continue
-                files.append(fname)
+                files.append(rel_path)
             except ValueError:
                 continue
     return sorted(files)
@@ -254,6 +255,7 @@ def write_build_log(user_id: int, slug: str, step: str, message: str) -> None:
     except ValueError:
         raise PermissionError("Invalid path for build log.")
         
+    pdir.mkdir(parents=True, exist_ok=True)
     now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     formatted_line = f"[{now_str}] [{step.upper()}] {message}\n"
     with open(log_file, "a", encoding="utf-8", errors="replace") as f:
@@ -715,6 +717,7 @@ function loop(time = 0) {
 startBtn.addEventListener('click', startGame);
 """
 
+    pdir.mkdir(parents=True, exist_ok=True)
     (pdir / "index.html").write_text(html, encoding="utf-8")
     (pdir / "style.css").write_text(css, encoding="utf-8")
     (pdir / "app.js").write_text(js, encoding="utf-8")

@@ -879,15 +879,17 @@
           <button class="tab-btn" id="tabTerminal" onclick="switchTab('terminal')">
             <span id="terminalTabIcon"></span> Terminal
           </button>
-          <button class="tab-btn" id="tabIndex" onclick="switchTab('index.html')">
-            index.html
-          </button>
-          <button class="tab-btn" id="tabStyle" onclick="switchTab('style.css')">
-            style.css
-          </button>
-          <button class="tab-btn" id="tabApp" onclick="switchTab('app.js')">
-            app.js
-          </button>
+          <div id="dynamicFileTabs" style="display: contents;">
+            <button class="tab-btn" id="tabIndex" data-file="index.html" onclick="switchTab('index.html')">
+              index.html
+            </button>
+            <button class="tab-btn" id="tabStyle" data-file="style.css" onclick="switchTab('style.css')">
+              style.css
+            </button>
+            <button class="tab-btn" id="tabApp" data-file="app.js" onclick="switchTab('app.js')">
+              app.js
+            </button>
+          </div>
         </div>
         <div style="display: flex; gap: var(--space-2); align-items: center;">
           <!-- Quick Split Presets -->
@@ -1734,7 +1736,30 @@
       }
     }
 
-    // --- Tab Navigation (6 Tabs) ---
+    // --- Tab Navigation & Dynamic File Tabs ---
+    function renderFileTabs() {
+      const container = document.getElementById('dynamicFileTabs');
+      if (!container) return;
+      const files = Object.keys(fileContents);
+      if (files.length === 0) return;
+
+      const priority = ["index.html", "style.css", "app.js"];
+      const sortedFiles = [...files].sort((a, b) => {
+        const idxA = priority.indexOf(a);
+        const idxB = priority.indexOf(b);
+        if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+        if (idxA !== -1) return -1;
+        if (idxB !== -1) return 1;
+        return a.localeCompare(b);
+      });
+
+      container.innerHTML = sortedFiles.map(fname => {
+        const isActive = (activeTab === fname) ? 'active' : '';
+        const escaped = fname.replace(/'/g, "\\'");
+        return `<button class="tab-btn ${isActive}" data-file="${fname}" title="${fname}" onclick="switchTab('${escaped}')">${fname}</button>`;
+      }).join('');
+    }
+
     function switchTab(tabName) {
       activeTab = tabName;
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -1756,17 +1781,23 @@
       clearBtn.style.display = 'inline-flex';
 
       if (tabName === 'chat') {
-        document.getElementById('tabChat').classList.add('active');
+        const btn = document.getElementById('tabChat');
+        if (btn) btn.classList.add('active');
         chatView.classList.add('active');
       } else if (tabName === 'antigravity') {
-        document.getElementById('tabAntigravity').classList.add('active');
+        const btn = document.getElementById('tabAntigravity');
+        if (btn) btn.classList.add('active');
         antigravityView.classList.add('active');
       } else if (tabName === 'terminal') {
-        document.getElementById('tabTerminal').classList.add('active');
+        const btn = document.getElementById('tabTerminal');
+        if (btn) btn.classList.add('active');
         terminalView.classList.add('active');
       } else {
-        const btnId = tabName === 'index.html' ? 'tabIndex' : tabName === 'style.css' ? 'tabStyle' : 'tabApp';
-        const btn = document.getElementById(btnId);
+        const selector = `.tab-btn[data-file="${tabName.replace(/"/g, '\\"')}"]`;
+        const btn = document.querySelector(selector) || 
+                    (tabName === 'index.html' ? document.getElementById('tabIndex') : 
+                     tabName === 'style.css' ? document.getElementById('tabStyle') : 
+                     tabName === 'app.js' ? document.getElementById('tabApp') : null);
         if (btn) btn.classList.add('active');
         editorView.style.display = 'flex';
         copyBtn.style.display = 'inline-flex';
@@ -1781,7 +1812,8 @@
         const data = await res.json();
         if (data.success && data.files) {
           fileContents = data.files;
-          if (activeTab === 'index.html' || activeTab === 'style.css' || activeTab === 'app.js') {
+          renderFileTabs();
+          if (fileContents[activeTab] !== undefined) {
             displayCodeFile(activeTab);
           }
         }
@@ -1832,7 +1864,7 @@
     }
 
     function copyCurrentCode() {
-      if (activeTab === 'index.html' || activeTab === 'style.css' || activeTab === 'app.js') {
+      if (fileContents && fileContents[activeTab] !== undefined) {
         const code = fileContents[activeTab] || '';
         copyToClipboard(code, `Copied ${activeTab} to clipboard`);
       }
@@ -1985,7 +2017,8 @@
               logAntigravity(`[PASS] ${data.summary}`, 'pass');
               if (data.content) {
                 fileContents = data.content;
-                if (activeTab === 'index.html' || activeTab === 'style.css' || activeTab === 'app.js') {
+                renderFileTabs();
+                if (fileContents[activeTab] !== undefined) {
                   displayCodeFile(activeTab);
                   const disp = document.getElementById('codeDisplay');
                   disp.classList.remove('flash');
@@ -2455,7 +2488,8 @@
           logAntigravity(`[PASS] ${data.summary || 'Game updated live.'}`, 'pass');
           if (data.content) {
             fileContents = data.content;
-            if (activeTab === 'index.html' || activeTab === 'style.css' || activeTab === 'app.js') {
+            renderFileTabs();
+            if (fileContents[activeTab] !== undefined) {
               displayCodeFile(activeTab);
               const disp = document.getElementById('codeDisplay');
               disp.classList.remove('flash');
