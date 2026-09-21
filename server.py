@@ -794,8 +794,14 @@ WORKFLOW & DESIGN GUIDELINES:
 - When they screenshare and play, observe their canvas, critique how it feels and looks, and discuss improvements.
 - When they want to add new features or fixes, repeat the process: draft the new prompt into their input box with `draft_prompt_to_input`, ask permission, and build!
 
+6. CHAT WINDOW TRANSCRIPTS (CRITICAL):
+- The creator is looking at an on-screen Chat tab while listening to you.
+- On EVERY turn when you speak (greeting them, asking questions, explaining options, discussing game mechanics), ALWAYS execute the `post_chat_message(message=...)` tool with the text of what you are saying to them!
+- This guarantees your message is simultaneously displayed on their Chat screen in clean readable markdown while you speak aloud in voice!
+
 TOOLS:
-- `draft_prompt_to_input(prompt: str)`: Populates the creator's on-screen input box with the drafted Antigravity build prompt.
+- `post_chat_message(message: str)`: Posts your response as formatted markdown text into the creator's Chat screen so they can read along while listening to your voice.
+- `draft_prompt_to_input(prompt: str)`: Populates the creator's on-screen command input box with the drafted Antigravity build prompt.
 - `send_prompt_to_antigravity(instruction: str)`: Hands off the approved instruction to Antigravity to build/compile the game.
 
 Keep your spoken voice responses conversational, energetic, clear, and natural. Keep spoken sentences punchy and engaging.
@@ -811,6 +817,17 @@ Current Game Repository Files:
 
         architect_tools = types.Tool(
             function_declarations=[
+                types.FunctionDeclaration(
+                    name="post_chat_message",
+                    description="Posts a markdown text chat message and transcript to the creator's on-screen Chat tab so they can read your suggestions, options, questions, or architectural plans while listening to your voice.",
+                    parameters=types.Schema(
+                        type="OBJECT",
+                        properties={
+                            "message": types.Schema(type="STRING", description="The markdown text message to show on the creator's Chat screen.")
+                        },
+                        required=["message"]
+                    )
+                ),
                 types.FunctionDeclaration(
                     name="draft_prompt_to_input",
                     description="Populates the drafted Antigravity engineering prompt into the creator's on-screen command input text box for review and editing before sending.",
@@ -882,7 +899,7 @@ Current Game Repository Files:
                 "status": "connected",
                 "model": connected_model
             })
-        await broadcast_project_log(slug, f"[LIVE] Connected to {connected_model}", "live")
+        await broadcast_project_log(slug, f"[CALL] Connected to {connected_model}", "call")
 
         # Greet user first and start the 'grill-me' project interview immediately
         try:
@@ -892,7 +909,8 @@ Current Game Repository Files:
                     f"The creator @{creator_name} has just joined the call for the HTML5 Canvas project '{slug}'. "
                     "Speak immediately right now in voice: Greet @{creator_name} warmly and with high energy! "
                     "Introduce yourself as their AI Game Architect & pair-programming co-pilot in Yulya Studio. "
-                    "Ask them what game or project idea they want to create today, and begin the design interview to help them plan and architect it!"
+                    "Ask them what game or project idea they want to create today, and begin the design interview to help them plan and architect it! "
+                    "Always execute post_chat_message tool so your greeting and questions appear in their on-screen Chat tab as you speak."
                 ),
                 end_of_turn=True
             )
@@ -1028,9 +1046,32 @@ async def _live_receive_loop(ws: web.WebSocketResponse, slug: str, session, api_
                     tool_call = response.tool_call
                     if tool_call and tool_call.function_calls:
                         for fc in tool_call.function_calls:
-                            if fc.name == "draft_prompt_to_input":
+                            if fc.name == "post_chat_message":
+                                chat_msg = fc.args.get("message", "").strip()
+                                if chat_msg and not ws.closed:
+                                    await ws.send_json({
+                                        "type": "ai_text",
+                                        "text": chat_msg
+                                    })
+                                await broadcast_project_log(slug, f"[TOOL] Live AI called post_chat_message: \"{chat_msg[:60]}...\"", "tool")
+
+                                tool_resp = types.LiveClientToolResponse(
+                                    function_responses=[
+                                        types.FunctionResponse(
+                                            name="post_chat_message",
+                                            id=fc.id,
+                                            response={"result": "Message rendered on creator's chat screen."}
+                                        )
+                                    ]
+                                )
+                                try:
+                                    await session.send(input=tool_resp)
+                                except Exception as e:
+                                    print(f"[LIVE TOOL SEND ERROR] {e}")
+
+                            elif fc.name == "draft_prompt_to_input":
                                 drafted_prompt = fc.args.get("prompt", "").strip()
-                                await broadcast_project_log(slug, f"[ARCHITECT] Drafted prompt to command box: \"{drafted_prompt[:80]}...\"", "info")
+                                await broadcast_project_log(slug, f"[TOOL] Live AI invoked draft_prompt_to_input: \"{drafted_prompt[:80]}...\"", "tool")
                                 if not ws.closed:
                                     await ws.send_json({
                                         "type": "set_command_input",
@@ -1060,7 +1101,8 @@ async def _live_receive_loop(ws: web.WebSocketResponse, slug: str, session, api_
 
                             elif fc.name in ("send_prompt_to_antigravity", "modify_game_code"):
                                 instruction = fc.args.get("instruction", "").strip()
-                                await broadcast_project_log(slug, f"[ARCHITECT] Antigravity build started: \"{instruction[:80]}...\"", "info")
+                                await broadcast_project_log(slug, f"[TOOL] Live AI invoked send_prompt_to_antigravity: \"{instruction[:80]}...\"", "tool")
+                                await broadcast_project_log(slug, f"[ARCHITECT_BUILD] Build prompt sent to Antigravity: \"{instruction[:80]}...\"", "user")
                                 if not ws.closed:
                                     await ws.send_json({"type": "show_loader", "text": f"Antigravity is coding: {instruction[:60]}..."})
                                     await ws.send_json({"type": "set_command_input", "text": ""})
@@ -1130,7 +1172,7 @@ async def stop_gemini_live_session(ws: web.WebSocketResponse):
                 except Exception:
                     pass
             if slug:
-                await broadcast_project_log(slug, "[LIVE] Disconnected from Gemini 3.8 Live", "live")
+                await broadcast_project_log(slug, "[CALL] Gemini 3.8 Live session disconnected.", "call")
 
 # --- WebSocket Hub: /ws/studio (Section 19, 20, 21, 22) ---
 
@@ -1264,7 +1306,11 @@ async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
                             text_input = data.get("text", "").strip()
                             if text_input:
                                 live_sess = ACTIVE_LIVE_SESSIONS[ws]["session"]
-                                await live_sess.send(input=text_input, end_of_turn=True)
+                                await live_sess.send(
+                                    input=f"The creator typed in chat: \"{text_input}\". Reply both in voice and execute post_chat_message tool so your response appears in their chat window!",
+                                    end_of_turn=True
+                                )
+                                await broadcast_project_log(slug, f"[VOICE] User sent chat message: \"{text_input[:60]}...\"", "voice")
                         
                     elif msg_type == "command":
                         # ONLY creator is authorized to execute commands (Section 21)

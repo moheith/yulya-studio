@@ -383,6 +383,45 @@
       padding: 20px;
     }
 
+    .chat-input-bar {
+      display: flex;
+      gap: var(--space-2);
+      padding: var(--space-2) var(--space-3);
+      border-top: 1px solid var(--border-subtle);
+      background-color: var(--bg-overlay);
+      flex-shrink: 0;
+      align-items: center;
+    }
+
+    .chat-text-input {
+      flex: 1;
+      height: 34px;
+      background-color: var(--bg-base);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      color: var(--text-primary);
+      padding: 0 var(--space-3);
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .chat-text-input:focus {
+      border-color: var(--accent-primary);
+      box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2);
+    }
+
+    .btn-chat-send {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 34px;
+      padding: 0 var(--space-3);
+      font-size: 13px;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+
     @keyframes fadeInBubble {
       from { opacity: 0; transform: translateY(6px); }
       to { opacity: 1; transform: translateY(0); }
@@ -482,6 +521,10 @@
     .log-badge.ai { color: #c084fc; font-weight: 700; }
     .log-badge.resume { color: #34d399; font-weight: 700; }
     .log-badge.exit { color: #94a3b8; font-weight: 700; }
+    .log-badge.call { color: #818cf8; font-weight: 700; }
+    .log-badge.voice { color: #38bdf8; font-weight: 700; }
+    .log-badge.tool { color: #fbbf24; font-weight: 700; }
+    .log-badge.vision { color: #ec4899; font-weight: 700; }
 
     .log-msg { color: var(--text-primary); word-break: break-word; font-family: var(--font-code); }
 
@@ -869,6 +912,12 @@
             <div>Connect Live AI to begin your game design session, or type your idea below.</div>
           </div>
         </div>
+        <div class="chat-input-bar">
+          <input type="text" id="chatTextInput" class="chat-text-input" placeholder="Message Gemini Live Architect..." autocomplete="off">
+          <button type="button" class="btn btn-primary btn-sm btn-chat-send" id="chatSendBtn" onclick="sendLiveChatMessage()">
+            <span id="chatSendIcon"></span> Send
+          </button>
+        </div>
       </div>
 
       <!-- Antigravity Engine View -->
@@ -1170,6 +1219,7 @@
     safeSetIcon('closeLeaveIcon', 'x');
     safeSetIcon('liveIcon', 'play');
     safeSetIcon('paletteSearchIcon', 'terminal');
+    safeSetIcon('chatSendIcon', 'send');
 
     // Studio State
     let activeTab = 'chat'; // 'chat' is default active tab
@@ -1196,6 +1246,7 @@
     let micStream = null;
     let micProcessor = null;
     let isSpeaking = false;
+    let isAiSpeakingVoice = false;
     let isListening = false;
     let isPTTActive = false;
 
@@ -1486,7 +1537,11 @@
         currentAiChatText = '';
       }
 
-      currentAiChatText += chunk;
+      if (currentAiChatText && chunk.startsWith(currentAiChatText)) {
+        currentAiChatText = chunk;
+      } else if (!currentAiChatText || !currentAiChatText.includes(chunk)) {
+        currentAiChatText += (currentAiChatText && !currentAiChatText.endsWith(' ') && !chunk.startsWith(' ') ? ' ' : '') + chunk;
+      }
       currentAiChatBubble.textContent = currentAiChatText;
       feed.scrollTop = feed.scrollHeight;
     }
@@ -1498,6 +1553,45 @@
       }
       currentAiChatBubble = null;
       currentAiChatText = '';
+    }
+
+    // --- Live Text Messaging to Gemini Live ---
+    function sendLiveChatMessage() {
+      const input = document.getElementById('chatTextInput');
+      if (!input) return;
+      const text = input.value.trim();
+      if (!text) return;
+
+      if (!isLiveConnected) {
+        ToastManager.show('Please click "Connect Live AI" at the top before chatting with Gemini Live.', 'info');
+        return;
+      }
+
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        ToastManager.show('Connecting to Studio server...', 'info');
+        connectWS();
+        return;
+      }
+
+      input.value = '';
+      addChatMessage('user', text);
+      logTerminal(`[VOICE] User sent chat message: "${text}"`, 'voice');
+
+      setLiveStatus('Extended Thinking (High)...', 'thinking');
+      ws.send(JSON.stringify({
+        type: 'live_text',
+        text: text
+      }));
+    }
+
+    const chatTextInputEl = document.getElementById('chatTextInput');
+    if (chatTextInputEl) {
+      chatTextInputEl.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          sendLiveChatMessage();
+        }
+      });
     }
 
     // --- Antigravity Engine Loader & Logging ---
@@ -1708,12 +1802,12 @@
             const step = (item.step || 'info').toLowerCase();
             const isAntigravity = (
               step === 'thinking' || step === 'diff' || step === 'replace_content' ||
-              step === 'verify' || step === 'pass' || step === 'fail' || step === 'search' ||
-              step === 'read_file' || step === 'architect' ||
+              step === 'verify' || step === 'pass' || step === 'fail' ||
               msg.startsWith('[THINKING]') || msg.startsWith('[DIFF]') ||
               msg.startsWith('[REPLACE_CONTENT]') || msg.startsWith('[VERIFY]') ||
               msg.startsWith('[PASS]') || msg.startsWith('[FAIL]') ||
-              msg.startsWith('[ARCHITECT]') || msg.startsWith('[USER]')
+              msg.startsWith('[ARCHITECT_BUILD]') ||
+              (msg.startsWith('[USER]') && !msg.startsWith('[USER] Spoken:'))
             );
             if (isAntigravity) {
               logAntigravity(msg, step, item.time);
@@ -1786,12 +1880,12 @@
 
               const isAntigravity = (
                 lvl === 'thinking' || lvl === 'diff' || lvl === 'replace_content' ||
-                lvl === 'verify' || lvl === 'pass' || lvl === 'fail' || lvl === 'search' ||
-                lvl === 'read_file' || lvl === 'architect' ||
+                lvl === 'verify' || lvl === 'pass' || lvl === 'fail' ||
                 msg.startsWith('[THINKING]') || msg.startsWith('[DIFF]') ||
                 msg.startsWith('[REPLACE_CONTENT]') || msg.startsWith('[VERIFY]') ||
                 msg.startsWith('[PASS]') || msg.startsWith('[FAIL]') ||
-                msg.startsWith('[ARCHITECT]') || msg.startsWith('[USER]')
+                msg.startsWith('[ARCHITECT_BUILD]') ||
+                (msg.startsWith('[USER]') && !msg.startsWith('[USER] Spoken:'))
               );
 
               if (isAntigravity) {
@@ -1831,6 +1925,10 @@
                 }
               }
             } else if (data.type === 'ai_audio') {
+              if (!isAiSpeakingVoice) {
+                isAiSpeakingVoice = true;
+                logTerminal('[VOICE] Gemini Live speaking...', 'voice');
+              }
               setLiveStatus('Gemini 3.8 Live Speaking...', 'speaking');
               if (data.pcm) {
                 liveAudioPlayer.playPCMChunk(data.pcm, data.rate || 24000);
@@ -1838,9 +1936,16 @@
             } else if (data.type === 'ai_text') {
               appendAiChatText(data.text);
             } else if (data.type === 'ai_turn_complete') {
+              if (isAiSpeakingVoice) {
+                isAiSpeakingVoice = false;
+                logTerminal('[VOICE] Gemini Live turn complete.', 'voice');
+              }
               setLiveStatus('Gemini 3.8 Live Ready', 'online');
               finalizeAiChatTurn();
             } else if (data.type === 'ai_interrupted') {
+              if (isAiSpeakingVoice) {
+                isAiSpeakingVoice = false;
+              }
               liveAudioPlayer.stop();
               finalizeAiChatTurn();
               logTerminal('[LIVE_AI] Speech interrupted by user input', 'live');
@@ -2131,9 +2236,7 @@
       if (isPTTActive || voiceMode !== 'ptt') return;
 
       if (!isLiveConnected) {
-        ToastManager.show('Connecting Live AI first... please wait a moment', 'info');
-        pendingLiveConnect = true;
-        toggleLiveAI();
+        ToastManager.show('Please click "Connect Live AI" at the top before holding Space to talk.', 'info');
         return;
       }
 
@@ -2143,6 +2246,8 @@
       if (pttBtn) pttBtn.classList.add('recording');
       const label = document.getElementById('pttLabel');
       if (label) label.textContent = 'Listening... (Click/Release to Send)';
+
+      logTerminal('[VOICE] User started speaking...', 'voice');
 
       // Immediately stop any AI voice audio to allow clean interruption
       liveAudioPlayer.stop();
@@ -2192,8 +2297,8 @@
       const spokenText = currentSpeechTranscript.trim();
       if (spokenText) {
         addChatMessage('user', spokenText);
-        logAntigravity(`[USER] Spoken: "${spokenText}"`, 'user');
       }
+      logTerminal(spokenText ? `[VOICE] Spoken: "${spokenText}"` : '[VOICE] User finished speaking.', 'voice');
 
       if (isLiveConnected) {
         setLiveStatus('Extended Thinking (High)...', 'thinking');
@@ -2209,6 +2314,10 @@
 
     if (pttBtn) {
       pttBtn.addEventListener('mousedown', (e) => {
+        if (!isLiveConnected) {
+          ToastManager.show('Please click "Connect Live AI" at the top before talking.', 'info');
+          return;
+        }
         pttPressStartTime = Date.now();
         if (isPTTToggledOn) {
           deactivatePTT();
@@ -2218,6 +2327,7 @@
       });
 
       pttBtn.addEventListener('mouseup', (e) => {
+        if (!isLiveConnected || !isPTTActive) return;
         const duration = Date.now() - pttPressStartTime;
         if (duration >= 350) {
           // Held down like a traditional walkie-talkie
@@ -2243,6 +2353,10 @@
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Space' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA' && !e.repeat && voiceMode === 'ptt') {
         e.preventDefault();
+        if (!isLiveConnected) {
+          ToastManager.show('Please click "Connect Live AI" at the top before holding Space to talk.', 'info');
+          return;
+        }
         spacePressStartTime = Date.now();
         if (isSpaceToggledOn) {
           deactivatePTT();
@@ -2259,6 +2373,7 @@
     window.addEventListener('keyup', (e) => {
       if (e.code === 'Space' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA' && voiceMode === 'ptt') {
         e.preventDefault();
+        if (!isLiveConnected || !isPTTActive) return;
         const duration = Date.now() - spacePressStartTime;
         if (duration >= 350) {
           deactivatePTT();

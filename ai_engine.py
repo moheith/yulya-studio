@@ -132,11 +132,18 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
             # Multi-model waterfall to absorb free-tier 20 RPD caps:
             # 1. gemini-3.8-flash (20 RPD) -> primary
             # 2. gemini-3.7-flash (20 RPD) -> fallback 1
-            # 3. gemini-3.6-flash (20 RPD) -> fallback 2
-            # 4. gemini-3.5-flash (20 RPD) -> fallback 3
-            # 5. gemini-3.5-flash-lite (500 RPD) -> fallback 4
-            # 6. gemini-3.1-flash-lite (500 RPD) -> fallback 5
+            # Multi-model waterfall to absorb free-tier 20 RPD caps:
+            # 1. gemini-2.5-flash (Production speed & quality)
+            # 2. gemini-2.0-flash (High speed fallback)
+            # 3. gemini-1.5-flash (Standard fallback)
+            # 4. gemini-3.8-flash (Preview)
+            # 5. gemini-3.7-flash (Preview)
+            # 6. gemini-3.5-flash (Preview)
+            # 7. gemini-3.5-flash-lite / 3.1-flash-lite (High RPD fallback)
             for model_name in [
+                "gemini-2.5-flash",
+                "gemini-2.0-flash",
+                "gemini-1.5-flash",
                 "gemini-3.8-flash",
                 "gemini-3.7-flash",
                 "gemini-3.6-flash",
@@ -175,10 +182,10 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
             raise RuntimeError("All models in the generation waterfall failed.")
             
         try:
-            # 90 second timeout on AI code generation across the multi-model waterfall
-            raw_response = await asyncio.wait_for(asyncio.to_thread(_call_gemini), timeout=90.0)
+            # 180 second timeout on AI code generation across the multi-model waterfall
+            raw_response = await asyncio.wait_for(asyncio.to_thread(_call_gemini), timeout=180.0)
         except asyncio.TimeoutError:
-            err_msg = "Google AI Studio request timed out after 90 seconds."
+            err_msg = "Google AI Studio request timed out after 180 seconds."
             fail_step = f"[FAIL] {err_msg}"
             projects_manager.write_build_log(user_id_int, safe_slug, "FAIL", fail_step)
             if log_callback:
@@ -279,7 +286,9 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
                     replace_step = f"[REPLACE_CONTENT] Updated {safe_fname} ({len(content)} bytes)"
                     projects_manager.write_build_log(user_id_int, safe_slug, "REPLACE_CONTENT", replace_step)
                     if log_callback:
-                        try: await log_callback("replace_content", replace_step)
+                        try:
+                            await log_callback("replace_content", replace_step)
+                            await log_callback("tool", f"[TOOL] Antigravity tool: write_file({safe_fname})")
                         except Exception: pass
                 except Exception as write_err:
                     print(f"[SECURITY] write_project_file rejected '{safe_fname}': {write_err}")
