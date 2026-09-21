@@ -1229,13 +1229,14 @@
               }
             } else if (data.type === 'ai_audio') {
               // Play Gemini Live streaming voice through browser speakers
+              setLiveStatus('Gemini 3.8 Live Speaking...', 'speaking');
               if (data.pcm) {
                 liveAudioPlayer.playPCMChunk(data.pcm, data.rate || 24000);
               }
             } else if (data.type === 'ai_text') {
               logTerminal(`[LIVE_AI] ${data.text}`, 'live');
             } else if (data.type === 'ai_turn_complete') {
-              setLiveStatus('Live Ready', 'online');
+              setLiveStatus('Gemini 3.8 Live Ready', 'online');
             } else if (data.type === 'ai_interrupted') {
               liveAudioPlayer.stop();
               logTerminal('[LIVE_AI] Speech interrupted by user input', 'live');
@@ -1244,18 +1245,23 @@
                 isLiveConnected = true;
                 setLiveStatus(data.model || 'Gemini 3.8 Live Ready', 'online');
                 updateLiveButton(true);
+                logTerminal(`[LIVE_AI] Connected to ${data.model || 'Gemini 3.8 Live Extended Thinking (High)'}. Speak or hold Space to talk.`, 'live');
                 ToastManager.show('Gemini 3.8 Live Connected', 'success');
+              } else if (data.status === 'connecting') {
+                setLiveStatus(data.message || 'Connecting to Gemini 3.8 Live...', 'connecting');
+                updateLiveButton(false, true);
               } else if (data.status === 'thinking') {
                 setLiveStatus('Extended Thinking (High)...', 'thinking');
               } else if (data.status === 'disconnected') {
                 isLiveConnected = false;
-                setLiveStatus('Live AI Disconnected', 'offline');
+                setLiveStatus('Gemini 3.8 Live (Offline)', 'offline');
                 updateLiveButton(false);
+                logTerminal('[LIVE_AI] Disconnected from Gemini 3.8 Live', 'info');
               }
             } else if (data.type === 'live_error') {
               logTerminal(`[LIVE_ERROR] ${data.message}`, 'error');
               ToastManager.show(data.message, 'error');
-              setLiveStatus('Live AI Error', 'offline');
+              setLiveStatus('Gemini 3.8 Live Error', 'offline');
               updateLiveButton(false);
             } else if (data.type === 'code_update') {
               hideTerminalLoader();
@@ -1307,14 +1313,20 @@
       }
     }
 
-    function updateLiveButton(connected) {
+    function updateLiveButton(connected, connecting = false) {
       const btn = document.getElementById('liveToggleBtn');
       const label = document.getElementById('liveBtnLabel');
-      if (connected) {
+      if (connecting) {
+        btn.classList.remove('connected');
+        btn.style.opacity = '0.75';
+        label.textContent = 'Connecting Live AI...';
+      } else if (connected) {
         btn.classList.add('connected');
+        btn.style.opacity = '1';
         label.textContent = 'Disconnect Live AI';
       } else {
         btn.classList.remove('connected');
+        btn.style.opacity = '1';
         label.textContent = 'Connect Live AI';
       }
     }
@@ -1333,44 +1345,92 @@
         liveAudioPlayer.stop();
         stopMicrophone();
         isLiveConnected = false;
-        setLiveStatus('Live AI Disconnected', 'offline');
+        setLiveStatus('Gemini 3.8 Live (Offline)', 'offline');
         updateLiveButton(false);
+        logTerminal('[LIVE_AI] Disconnected from Gemini 3.8 Live', 'info');
         ToastManager.show('Live AI Disconnected', 'info');
       } else {
         // Connect
         setLiveStatus('Connecting to Gemini 3.8 Live...', 'connecting');
+        updateLiveButton(false, true);
+        logTerminal('[LIVE] Connecting to Gemini 3.8 Live Extended Thinking (High)...', 'thinking');
         ws.send(JSON.stringify({ type: 'connect_live' }));
         liveAudioPlayer.init();
+        if (voiceMode === 'continuous') {
+          startMicrophone().then(ok => {
+            if (ok) {
+              isListening = true;
+              setLiveStatus('Continuous Voice Active', 'listening');
+              animateWaveform('listening');
+            }
+          });
+        }
       }
+    }
+
+    // Linear box downsampler from hardware rate (e.g. 48kHz / 44.1kHz) to exactly 16kHz
+    function downsampleTo16kHz(buffer, sampleRate) {
+      if (sampleRate === 16000) return buffer;
+      const ratio = sampleRate / 16000;
+      const newLength = Math.round(buffer.length / ratio);
+      const result = new Float32Array(newLength);
+      let offsetResult = 0;
+      let offsetBuffer = 0;
+      while (offsetResult < result.length) {
+        const nextOffsetBuffer = Math.round((offsetResult + 1) * ratio);
+        let accum = 0;
+        let count = 0;
+        for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+          accum += buffer[i];
+          count++;
+        }
+        result[offsetResult] = count > 0 ? (accum / count) : 0;
+        offsetResult++;
+        offsetBuffer = nextOffsetBuffer;
+      }
+      return result;
     }
 
     // --- In-Browser Web Audio Capture (16kHz PCM Int16) ---
     async function startMicrophone() {
-      if (micStream && micAudioContext) return true;
+      if (micStream && micAudioContext) {
+        if (micAudioContext.state === 'suspended') {
+          await micAudioContext.resume().catch(() => {});
+        }
+        return true;
+      }
       try {
         micStream = await navigator.mediaDevices.getUserMedia({
           audio: {
             channelCount: 1,
-            sampleRate: 16000,
             echoCancellation: true,
-            noiseSuppression: true
+            noiseSuppression: true,
+            autoGainControl: true
           }
         });
 
         const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-        micAudioContext = new AudioContextClass({ sampleRate: 16000 });
+        // Native hardware AudioContext avoids NotSupportedError on Windows
+        micAudioContext = new AudioContextClass();
+        if (micAudioContext.state === 'suspended') {
+          await micAudioContext.resume().catch(() => {});
+        }
+
         const source = micAudioContext.createMediaStreamSource(micStream);
-        micProcessor = micAudioContext.createScriptProcessor(2048, 1, 1);
+        micProcessor = micAudioContext.createScriptProcessor(4096, 1, 1);
 
         micProcessor.onaudioprocess = (e) => {
           if (!isListening && voiceMode !== 'continuous') return;
           const inputData = e.inputBuffer.getChannelData(0);
 
+          // Downsample from hardware sample rate to 16kHz
+          const downsampled = downsampleTo16kHz(inputData, micAudioContext.sampleRate);
+
           // Convert Float32 to Int16 PCM
-          const buffer = new ArrayBuffer(inputData.length * 2);
+          const buffer = new ArrayBuffer(downsampled.length * 2);
           const view = new DataView(buffer);
-          for (let i = 0; i < inputData.length; i++) {
-            let s = Math.max(-1, Math.min(1, inputData[i]));
+          for (let i = 0; i < downsampled.length; i++) {
+            let s = Math.max(-1, Math.min(1, downsampled[i]));
             view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
           }
 
@@ -1387,12 +1447,16 @@
           }
         };
 
+        // Mute node prevents microphone loopback through speakers
+        const muteNode = micAudioContext.createGain();
+        muteNode.gain.value = 0;
         source.connect(micProcessor);
-        micProcessor.connect(micAudioContext.destination);
+        micProcessor.connect(muteNode);
+        muteNode.connect(micAudioContext.destination);
         return true;
       } catch (err) {
-        logTerminal(`Microphone access blocked: ${err.message}`, 'warning');
-        ToastManager.show('Microphone access blocked. Please allow mic in browser.', 'error');
+        logTerminal(`Microphone access error: ${err.message}`, 'error');
+        ToastManager.show(`Microphone error: ${err.message}`, 'error');
         return false;
       }
     }
@@ -1447,6 +1511,8 @@
       pttBtn.classList.add('recording');
       document.getElementById('pttLabel').textContent = 'Listening... (Release)';
 
+      liveAudioPlayer.init();
+
       if (!isLiveConnected) {
         toggleLiveAI();
       }
@@ -1467,7 +1533,10 @@
       document.getElementById('pttLabel').textContent = 'Hold Space to Talk';
       stopWaveform();
       if (isLiveConnected) {
-        setLiveStatus('Gemini 3.8 Live Ready', 'online');
+        setLiveStatus('Extended Thinking (High)...', 'thinking');
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'audio_end' }));
+        }
       }
     }
 

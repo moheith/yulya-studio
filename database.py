@@ -402,10 +402,23 @@ async def list_user_projects(user_id: int):
     return projects
 
 async def get_project(user_id: int, slug: str):
-    """Fetches a specific project by user and slug."""
+    """Fetches a specific project by user and slug (handles int/str user_id and case-insensitive slug)."""
     if projects_col is None:
         return None
-    proj = await projects_col.find_one({"user_id": int(user_id), "slug": slug})
+    try:
+        uid_int = int(user_id)
+    except (ValueError, TypeError):
+        uid_int = None
+    uid_str = str(user_id)
+    query_or = []
+    if uid_int is not None:
+        query_or.append({"user_id": uid_int})
+    query_or.append({"user_id": uid_str})
+
+    clean_slug = slug.strip().lower()
+    proj = await projects_col.find_one({"$or": query_or, "slug": clean_slug})
+    if not proj:
+        proj = await projects_col.find_one({"$or": query_or, "slug": {"$regex": f"^{re.escape(clean_slug)}$", "$options": "i"}})
     if proj:
         proj["_id"] = str(proj["_id"])
     return proj
