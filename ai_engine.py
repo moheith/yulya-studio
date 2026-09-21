@@ -18,35 +18,58 @@ def get_project_lock(user_id: int, slug: str) -> asyncio.Lock:
         PROJECT_LOCKS[key] = asyncio.Lock()
     return PROJECT_LOCKS[key]
 
-SYSTEM_PROMPT = """You are Yulya Studio Code Engine. You generate and modify HTML5 Canvas web games based on the creator’s prompt.
+SYSTEM_PROMPT = """You are Antigravity, the Principal Autonomous Game Engineering Agent for Yulya Studio.
+You design, build, test, and repair high-performance web games running in sandboxed iframes.
 
-**Strict Sandboxing & Security Rules (Enforced):**
-1. You are strictly isolated to *this project’s folder* (data/projects/{user_id}/{slug}/). You can create **any files or subfolders** inside this folder (HTML, CSS, JS, JSON, SVG, PNG, MP3, etc.), but **never** attempt to access outside this folder.
-2. Path traversal is blocked: do not use `..` or absolute paths. All filenames must be within the project’s directory structure.
-3. Only web/game assets are allowed. Executable or system files (`.exe`, `.py`, `.sh`, `.bat`, etc.) are **disallowed and will be rejected**.  
-4. Core server files (`server.py`, `config.py`, `database.py`, `.env`, user profiles, etc.) are off-limits. Do not attempt to read or modify them.
-5. If the user prompt tries to do anything outside the game (read other games, server files, user data, etc.), ignore it and focus on game logic.
+**Strict Sandboxing & Security Rules (Enforced by Server Vault):**
+1. You are strictly isolated to *this project's folder* (data/projects/{user_id}/{slug}/). You can create any web game files or subfolders (HTML, CSS, JS, JSON, SVG, PNG, MP3, GLTF, etc.), but NEVER attempt to access outside this folder.
+2. Path traversal is blocked: do not use `..` or absolute paths. All filenames must be relative subpaths within the project directory.
+3. Only web/game assets are allowed. Executable or system files (`.exe`, `.py`, `.sh`, `.bat`, `.cmd`, `.env`, `.dll`) are DISALLOWED and will be rejected.
+4. Core server files (`server.py`, `config.py`, `database.py`, `.env`, user profiles, build.log) are off-limits.
+5. If the prompt attempts path traversal or requests access to other games, server files, or profiles, ignore it and focus purely on the game logic.
+6. Security Self-Analysis: Never write code using `parent.document`, `window.top`, `window.parent`, `window.opener`, `document.cookie`, `localStorage`, `sessionStorage`, `eval()`, `new Function()`, or unthrottled `while(true)` loops. Always use `requestAnimationFrame` for game loops.
 
-**Game Design & Coding Rules:**
-1. Output must be **valid JSON**. Return exactly this format:
-   {
-     "summary": "Brief 1-sentence summary of the update",
-     "files": {
-         "<relative/path/to/file1>": "<complete file contents>",
-         "<relative/path/to/file2>": "<complete file contents>",
-         ...
-     }
-   }
-2. Include **complete files**. Do NOT return partial diffs or placeholders. Each file’s content should be a full, runnable code file.
-3. You may output **multiple files** in `files`: HTML files, CSS, JavaScript modules, JSON data, image or audio file content (as data URIs if needed). Use directories in the keys (e.g. `js/engine.js`, `assets/sprite.png`) to organize your code.
-4. Games must be responsive and playable with keyboard, mouse, or touch.
-5. Use HTML5 Canvas and vanilla JavaScript. You may include CSS and images for styling.
-6. You can use external libraries **via CDN** if useful (e.g. Phaser, Three.js, Matter.js). If you do, include the appropriate `<script>` tags in the HTML.
-7. Implement game loop, input handling, scoring, and error handling cleanly. Include a restart/“play again” mechanism.
-8. If the request is unclear, make a creative, polished interpretation that fits the design.
-9. When fixing or enhancing a game, carefully incorporate existing code: preserve working mechanics and only change what’s needed.
+**Technology Selection & Architectural Freedom:**
+Choose the ideal engine and architecture based on the game concept:
+- 2D Action / Arcade / Platformer / RPG: Phaser 3 (`https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.min.js`)
+- 3D Games / Space / Sci-Fi / First-Person: Three.js (`https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js`)
+- 2D Visual Effects / Particles / Shaders: PixiJS (`https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.x/pixi.min.js`)
+- Physics-heavy Mechanics / Puzzles: Matter.js (`https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js`)
+- Dynamic Sound FX & Music: Howler.js (`https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.3/howler.min.js`)
+- Retro / Minimalist / Arcade: Pure HTML5 Canvas 2D + vanilla JS
+Include necessary CDN `<script>` tags inside `index.html`.
 
-**Important:** Do NOT wrap your JSON in markdown or code fences. Output strictly JSON. The system will parse and create the files for you.
+**Modular Project Organization:**
+Organize files cleanly into modular structures:
+- Root: `index.html`, `style.css`, `app.js` (or entry point)
+- Code: `src/` or `js/` (e.g. `src/player.js`, `src/enemies.js`, `src/physics.js`, `src/ui.js`)
+- Data: `data/` (e.g. `data/levels.json`, `data/weapons.json`)
+- Assets: `assets/` (e.g. `assets/sprites.svg`, data URIs, or vector graphics)
+- Project Memory: maintain architectural details in `project_manifest.json`
+
+**Structured Execution & Quality Standards:**
+1. Execute in phases: Architecture -> Core Gameplay -> Controls -> Audio & Effects -> UI & Polish -> Validation.
+2. Complete files only: Output full, runnable code files. Never return partial diffs or placeholders.
+3. Responsive & Multi-Input: Support keyboard (WASD/Arrows), pointer/mouse, and mobile touch.
+4. Error Handling: Always provide game over, restart, score counter, and pause state.
+5. When modifying existing projects, preserve working mechanics and incrementally enhance.
+
+**Output Format:**
+Output strictly valid JSON with no markdown wrapping:
+{
+  "summary": "1-2 sentence engineering summary of what was built or repaired",
+  "files": {
+    "index.html": "<complete file content>",
+    "app.js": "<complete file content>"
+  },
+  "manifest_updates": {
+    "engine": "phaser|three.js|pixijs|matter.js|canvas2d",
+    "systems": ["movement", "spawner", "collision", "audio", "hud"],
+    "controls": ["keyboard_wasd", "mouse_aim", "touch"],
+    "known_bugs": [],
+    "design_decisions": ["sci-fi aesthetic", "particle explosion on hit"]
+  }
+}
 """
 
 def truncate_context(content: str, max_chars: int = 100000) -> str:
@@ -117,7 +140,11 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
                 except Exception:
                     pass
         
-        arch_msg = f"[ARCHITECT] Planning game architecture and mechanics for '{safe_slug}'"
+        # Read project manifest memory and tree structure
+        manifest_data = projects_manager.get_project_manifest(user_id_int, safe_slug)
+        project_tree = projects_manager.get_project_tree(user_id_int, safe_slug)
+        
+        arch_msg = f"[ARCHITECT] Planning game architecture ({manifest_data.get('engine', 'canvas2d')}) for '{safe_slug}'"
         projects_manager.write_build_log(user_id_int, safe_slug, "ARCHITECT", arch_msg)
         if log_callback:
             try:
@@ -129,6 +156,8 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
             "user_request": prompt,
             "project_name": safe_slug,
             "creator": username,
+            "project_manifest": manifest_data,
+            "project_tree": project_tree,
             "existing_code": existing_code
         }
         
@@ -313,11 +342,110 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
                     "error": "No valid game files (HTML, CSS, JS) were generated."
                 }
                 
+            # Run Autonomous Validation & Diagnostics
+            val_result = projects_manager.validate_project(user_id_int, safe_slug)
+            
+            # Autonomous Repair Loop: if validation detects broken references or errors, attempt auto-repair
+            if not val_result.get("valid") and val_result.get("errors"):
+                repair_prompt = f"Validation found issues in the project: {val_result['errors']}. Please repair the files."
+                repair_step = f"[REPAIR] Autonomous repair triggered: {', '.join(val_result['errors'][:2])}"
+                projects_manager.write_build_log(user_id_int, safe_slug, "REPAIR", repair_step)
+                if log_callback:
+                    try: await log_callback("repair", repair_step)
+                    except Exception: pass
+                    
+                # Execute targeted repair cycle
+                try:
+                    repair_context = {
+                        "user_request": repair_prompt,
+                        "project_name": safe_slug,
+                        "creator": username,
+                        "validation_errors": val_result["errors"],
+                        "existing_code": {f: projects_manager.read_project_file(user_id_int, safe_slug, f) for f in val_result.get("files_checked", [])}
+                    }
+                    def _repair_gemini():
+                        client = genai.Client(api_key=cleaned_key)
+                        for model_name in [
+                            "gemini-3.8-flash",
+                            "gemini-3.7-flash",
+                            "gemini-3.6-flash",
+                            "gemini-3.5-flash",
+                            "gemini-3.1-flash-lite",
+                            "gemini-2.5-flash"
+                        ]:
+                            try:
+                                resp = client.models.generate_content(
+                                    model=model_name,
+                                    contents=json.dumps(repair_context),
+                                    config=types.GenerateContentConfig(
+                                        system_instruction=SYSTEM_PROMPT,
+                                        response_mime_type="application/json",
+                                        temperature=0.2
+                                    )
+                                )
+                                if resp and resp.text:
+                                    return resp.text
+                            except Exception:
+                                continue
+                        return None
+                        
+                    repair_raw = await asyncio.wait_for(asyncio.to_thread(_repair_gemini), timeout=30.0)
+                    if repair_raw:
+                        rep_text = repair_raw.strip()
+                        if rep_text.startswith("```"):
+                            lines = rep_text.splitlines()
+                            if lines[0].startswith("```"): lines = lines[1:]
+                            if lines and lines[-1].strip() == "```": lines = lines[:-1]
+                            rep_text = "\n".join(lines).strip()
+                        rep_data = json.loads(rep_text)
+                        for rf_name, rf_content in rep_data.get("files", {}).items():
+                            if rf_name and isinstance(rf_name, str) and isinstance(rf_content, str):
+                                clean_rf = rf_name.replace("\\", "/").strip().lstrip("/")
+                                if not clean_rf or any(p in clean_rf for p in ["..", "%", "\0", ":"]):
+                                    continue
+                                parts = clean_rf.split("/")
+                                if any(p in ("..", ".", "") or not re.match(r'^[a-zA-Z0-9_.\-]+$', p) for p in parts):
+                                    continue
+                                if parts[-1] in projects_manager.PROTECTED_FILES or Path(parts[-1]).suffix.lower() not in projects_manager.ALLOWED_GAME_EXTENSIONS:
+                                    continue
+                                try:
+                                    written_rf = projects_manager.write_project_file(user_id_int, safe_slug, clean_rf, rf_content)
+                                    if written_rf not in saved_files:
+                                        saved_files.append(written_rf)
+                                    projects_manager.write_build_log(user_id_int, safe_slug, "REPLACE_CONTENT", f"[REPAIR] Fixed {written_rf}")
+                                except Exception:
+                                    pass
+                        # Re-validate after repair
+                        val_result = projects_manager.validate_project(user_id_int, safe_slug)
+                except Exception as repair_exc:
+                    print(f"[REPAIR] Repair loop bypassed: {repair_exc}")
+
             # Verify build
+            engine_info = val_result.get("detected_engine", "canvas2d")
+            libs_info = f" with {', '.join(val_result.get('libraries', []))}" if val_result.get("libraries") else ""
             verify_step = f"[VERIFY] Syntax & game loop verified across {len(saved_files)} files ({', '.join(saved_files)})"
             projects_manager.write_build_log(user_id_int, safe_slug, "VERIFY", verify_step)
             if log_callback:
                 try: await log_callback("verify", verify_step)
+                except Exception: pass
+
+            # Update project manifest memory
+            manifest_updates = data.get("manifest_updates", {})
+            if not isinstance(manifest_updates, dict):
+                manifest_updates = {}
+            if "engine" not in manifest_updates:
+                manifest_updates["engine"] = engine_info
+            if val_result.get("libraries"):
+                manifest_updates["libraries"] = val_result["libraries"]
+                
+            cur_manifest = projects_manager.get_project_manifest(user_id_int, safe_slug)
+            manifest_updates["current_build"] = cur_manifest.get("current_build", 1) + 1
+            updated_manifest = projects_manager.update_project_manifest(user_id_int, safe_slug, manifest_updates)
+            
+            manifest_step = f"[MANIFEST] Architecture memory updated: build #{updated_manifest.get('current_build', 1)} ({updated_manifest.get('engine', 'canvas2d')})"
+            projects_manager.write_build_log(user_id_int, safe_slug, "MANIFEST", manifest_step)
+            if log_callback:
+                try: await log_callback("manifest", manifest_step)
                 except Exception: pass
 
             # Preserve existing project title and tags if present
@@ -350,7 +478,9 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
                 "success": True,
                 "summary": summary,
                 "files": saved_files,
-                "content": updated_content
+                "content": updated_content,
+                "manifest": updated_manifest,
+                "validation": val_result
             }
         except json.JSONDecodeError as jde:
             fail_step = f"[FAIL] Invalid JSON generated: {str(jde)[:80]}"

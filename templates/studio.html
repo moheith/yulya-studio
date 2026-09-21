@@ -2509,7 +2509,7 @@
       }
     }
 
-    // Screensharing (1 FPS 720p vision to Gemini Live & spectators)
+    // Screensharing (2 FPS 1080p vision to Gemini Live & spectators)
     async function toggleScreenShare() {
       const btn = document.getElementById('screenShareBtn');
       const badge = document.getElementById('screenVisionBadge');
@@ -2532,19 +2532,25 @@
       }
 
       try {
-        screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { width: 1280, height: 720 } });
+        screenStream = await navigator.mediaDevices.getDisplayMedia({
+          video: {
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+            frameRate: { ideal: 2, max: 5 }
+          }
+        });
         btn.classList.remove('btn-outline');
         btn.classList.add('btn-primary');
         badge.classList.add('active');
-        logTerminal('Screenshare active. Gemini Live is now inspecting your screen & canvas live.', 'success');
+        logTerminal('Screenshare active (1080p @ 2 FPS). Gemini Live is now actively observing your gameplay and canvas.', 'success');
 
         const video = document.createElement('video');
         video.srcObject = screenStream;
         video.play();
 
         const canvas = document.createElement('canvas');
-        canvas.width = 1280;
-        canvas.height = 720;
+        canvas.width = 1920;
+        canvas.height = 1080;
         const ctx = canvas.getContext('2d');
 
         screenInterval = setInterval(() => {
@@ -2552,7 +2558,7 @@
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
           const base64 = canvas.toDataURL('image/jpeg', 0.65).split(',')[1];
           ws.send(JSON.stringify({ type: 'video_frame', data: base64 }));
-        }, 1000); // 1 frame per second
+        }, 500); // 2 frames per second (500ms interval)
 
         screenStream.getVideoTracks()[0].onended = () => toggleScreenShare();
       } catch (err) {

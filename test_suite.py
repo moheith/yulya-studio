@@ -660,6 +660,87 @@ async def run_tests():
     except Exception as e:
         assert_true(False, f"AI engine sandboxing test failed: {e}")
 
+    # 10. Testing Yulya Studio v2 Autonomous Agent Architecture
+    print("\n10. Testing Yulya Studio v2 Autonomous Agent Architecture...")
+    v2_user = 555444333
+    v2_slug = "v2-autonomous-test"
+    try:
+        # 10.1 Starter manifest generation
+        projects_manager.create_starter_game(v2_user, "v2tester", v2_slug, "V2 Autonomous Game")
+        manifest = projects_manager.get_project_manifest(v2_user, v2_slug)
+        assert_true(isinstance(manifest, dict), "Project manifest generated as dictionary")
+        assert_true(manifest.get("engine") == "canvas2d", f"Starter game detected engine: {manifest.get('engine')}")
+        assert_true("movement" in manifest.get("systems", []), "Starter systems recorded in manifest")
+        assert_true(manifest.get("current_build") == 1, "Starter build number is 1")
+        
+        # 10.2 Updating project manifest memory
+        updated_man = projects_manager.update_project_manifest(v2_user, v2_slug, {
+            "design_decisions": ["neon_aesthetic", "fast_lasers"],
+            "creator_preferences": ["prefers_dark_mode"],
+            "current_build": 2
+        })
+        assert_true("neon_aesthetic" in updated_man.get("design_decisions", []), "Design decision persisted to manifest")
+        assert_true("prefers_dark_mode" in updated_man.get("creator_preferences", []), "Creator preference persisted to manifest")
+        assert_true(updated_man.get("current_build") == 2, "Build number incremented in manifest")
+        
+        # 10.3 Project Validation
+        val_report = projects_manager.validate_project(v2_user, v2_slug)
+        assert_true(val_report.get("valid") is True, f"Starter project passes validation: valid={val_report.get('valid')}")
+        assert_true(len(val_report.get("errors", [])) == 0, "Zero validation errors on clean starter project")
+        assert_true(val_report.get("detected_engine") == "canvas2d", "Engine correctly detected during validation")
+        
+        # 10.4 Validation catches broken script reference
+        broken_html = '<!DOCTYPE html><html><head><script src="missing_script.js"></script></head><body><canvas></canvas></body></html>'
+        projects_manager.write_project_file(v2_user, v2_slug, "index.html", broken_html)
+        val_broken = projects_manager.validate_project(v2_user, v2_slug)
+        assert_true(val_broken.get("valid") is False, "Validation detects missing script reference")
+        assert_true(any("missing_script.js" in err for err in val_broken.get("errors", [])), "Error message names broken script")
+        
+        # Restore valid index.html
+        projects_manager.write_project_file(v2_user, v2_slug, "index.html", "<!DOCTYPE html><html><body><canvas id='c'></canvas><script src='app.js'></script></body></html>")
+        
+        # 10.5 Project Search
+        projects_manager.write_project_file(v2_user, v2_slug, "src/physics.js", "// Laser collision calculation\nfunction checkCollision() { return true; }")
+        search_hits = projects_manager.search_project_files(v2_user, v2_slug, "Laser collision")
+        assert_true(len(search_hits) > 0, "search_project_files found text match")
+        assert_true(search_hits[0]["file"] == "src/physics.js", f"search_project_files identified correct file: {search_hits[0]['file']}")
+        
+        # 10.6 Project Tree
+        tree = projects_manager.get_project_tree(v2_user, v2_slug)
+        assert_true(tree.get("type") == "directory", "Project tree root is a directory")
+        assert_true(len(tree.get("children", [])) > 0, f"Project tree has children: {len(tree.get('children', []))}")
+        
+        # 10.7 File Deletion and Security
+        del_success = projects_manager.delete_project_file(v2_user, v2_slug, "src/physics.js")
+        assert_true(del_success is True, "delete_project_file successfully deleted non-protected file")
+        assert_true(projects_manager.read_project_file(v2_user, v2_slug, "src/physics.js") == "", "Deleted file is no longer readable")
+        
+        # Blocked deletion of protected file
+        del_protected_caught = False
+        try:
+            projects_manager.delete_project_file(v2_user, v2_slug, "server.py")
+        except PermissionError:
+            del_protected_caught = True
+        assert_true(del_protected_caught, "delete_project_file blocks deletion of protected server.py")
+        
+        # Blocked traversal deletion
+        del_traversal_caught = False
+        try:
+            projects_manager.delete_project_file(v2_user, v2_slug, "../../../other_file.txt")
+        except (PermissionError, ValueError):
+            del_traversal_caught = True
+        assert_true(del_traversal_caught, "delete_project_file blocks path traversal deletion")
+        
+        # 10.8 Screenshare 1080p and 2 FPS verification in studio.html
+        studio_html_content = Path("templates/studio.html").read_text(encoding="utf-8")
+        assert_true("1920" in studio_html_content and "1080" in studio_html_content, "Screenshare configured for 1080p in studio.html")
+        assert_true("500" in studio_html_content, "Screenshare interval configured for 500ms (2 FPS) in studio.html")
+        
+        # Cleanup
+        projects_manager.delete_project_dir(v2_user, v2_slug)
+    except Exception as e:
+        assert_true(False, f"V2 autonomous agent test failed: {e}")
+
     print(f"\n=== TEST SUITE COMPLETED: {tests_passed} PASSED, {tests_failed} FAILED ===")
     return tests_failed == 0
 

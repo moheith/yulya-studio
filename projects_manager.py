@@ -1,6 +1,7 @@
 import os
 import re
 import io
+import json
 import shutil
 import zipfile
 from pathlib import Path
@@ -721,7 +722,302 @@ startBtn.addEventListener('click', startGame);
     (pdir / "index.html").write_text(html, encoding="utf-8")
     (pdir / "style.css").write_text(css, encoding="utf-8")
     (pdir / "app.js").write_text(js, encoding="utf-8")
+    
+    # Initialize starter project manifest for architectural memory
+    initial_manifest = {
+        "title": title,
+        "slug": slug.lower(),
+        "engine": "canvas2d",
+        "architecture": "starter-loop",
+        "files": ["index.html", "style.css", "app.js"],
+        "systems": ["movement", "enemy_spawner", "collision_aabb", "scoring", "particle_effects"],
+        "controls": ["keyboard_arrows_wasd", "touch_pointer"],
+        "known_bugs": [],
+        "design_decisions": ["cyberpunk_neon_theme", "particle_explosions", "adaptive_difficulty"],
+        "creator_preferences": [],
+        "performance_targets": {"fps": 60, "resolution": "600x400"},
+        "current_build": 1,
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }
+    (pdir / "project_manifest.json").write_text(json.dumps(initial_manifest, indent=2), encoding="utf-8")
     return ["index.html", "style.css", "app.js"]
+
+def delete_project_file(user_id: int, slug: str, filename: str) -> bool:
+    """
+    Safely deletes a file from the project repository.
+    Enforces path containment, blocks deletion of PROTECTED_FILES and hidden files.
+    """
+    if not filename or not isinstance(filename, str):
+        return False
+        
+    clean_name = filename.replace("\\", "/").strip().lstrip("/")
+    if any(p in clean_name for p in ["..", "%", "\0", ":"]):
+        raise PermissionError("Path traversal attempt in filename.")
+        
+    parts = clean_name.split("/")
+    for part in parts:
+        if not re.match(r'^[a-zA-Z0-9_.\-]+$', part) or part in {".", ".."}:
+            raise ValueError(f"Invalid filename component: {part}")
+            
+    safe_name = parts[-1]
+    if safe_name.startswith(".") or safe_name in PROTECTED_FILES or any(p in PROTECTED_FILES for p in parts):
+        raise PermissionError(f"Cannot delete protected file: {safe_name}")
+        
+    pdir = get_user_project_dir(user_id, slug)
+    target = (pdir / clean_name).resolve()
+    
+    try:
+        target.relative_to(pdir)
+    except ValueError:
+        raise PermissionError("Path traversal attempt: file outside project repository.")
+        
+    if target.is_symlink() or os.path.islink(target):
+        raise PermissionError("Symlinks are not allowed.")
+        
+    if target.exists() and target.is_file():
+        target.unlink()
+        curr = target.parent
+        while curr != pdir and curr.exists() and not any(curr.iterdir()):
+            try:
+                curr.rmdir()
+                curr = curr.parent
+            except Exception:
+                break
+        return True
+    return False
+
+def search_project_files(user_id: int, slug: str, query: str, max_results: int = 20) -> list[dict]:
+    """
+    Searches across text files in the project for a query substring (case-insensitive).
+    Returns list of matches: [{"file": relative_path, "line": line_no, "snippet": text}]
+    """
+    if not query or not isinstance(query, str):
+        return []
+        
+    pdir = get_user_project_dir(user_id, slug)
+    if not pdir.exists():
+        return []
+        
+    files = list_project_files(user_id, slug)
+    results = []
+    lower_query = query.lower()
+    text_extensions = {".html", ".css", ".js", ".json", ".svg", ".txt", ".csv", ".tsv", ".xml"}
+    
+    for frel in files:
+        target = (pdir / frel).resolve()
+        if not target.exists() or not target.is_file() or target.suffix.lower() not in text_extensions:
+            continue
+        try:
+            content = target.read_text(encoding="utf-8", errors="replace")
+            for line_no, line in enumerate(content.splitlines(), start=1):
+                if lower_query in line.lower():
+                    results.append({
+                        "file": frel,
+                        "line": line_no,
+                        "snippet": line.strip()[:150]
+                    })
+                    if len(results) >= max_results:
+                        return results
+        except Exception:
+            continue
+            
+    return results
+
+def get_project_tree(user_id: int, slug: str) -> dict:
+    """
+    Builds a tree structure of all files and folders in the project repository.
+    """
+    pdir = get_user_project_dir(user_id, slug)
+    if not pdir.exists():
+        return {"name": slug, "type": "directory", "children": []}
+        
+    def _build_node(path: Path) -> dict:
+        if path.is_dir():
+            children = []
+            for child in sorted(path.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
+                if child.name.startswith(".") or child.name in PROTECTED_FILES or child.name == "build.log":
+                    continue
+                if child.is_symlink() or os.path.islink(child):
+                    continue
+                children.append(_build_node(child))
+            return {
+                "name": path.name,
+                "type": "directory",
+                "children": children
+            }
+        else:
+            return {
+                "name": path.name,
+                "type": "file",
+                "size": path.stat().st_size if path.exists() else 0,
+                "ext": path.suffix.lower()
+            }
+            
+    root_node = _build_node(pdir)
+    root_node["name"] = slug
+    return root_node
+
+def get_project_manifest(user_id: int, slug: str) -> dict:
+    """
+    Reads the project_manifest.json file. If missing, auto-generates one from current files.
+    """
+    manifest_raw = read_project_file(user_id, slug, "project_manifest.json")
+    if manifest_raw:
+        try:
+            return json.loads(manifest_raw)
+        except Exception:
+            pass
+            
+    files = list_project_files(user_id, slug)
+    html_content = read_project_file(user_id, slug, "index.html")
+    
+    engine = "canvas2d"
+    libraries = []
+    html_lower = html_content.lower() if html_content else ""
+    if "phaser" in html_lower:
+        engine = "phaser"
+        libraries.append("Phaser")
+    elif "three" in html_lower:
+        engine = "three.js"
+        libraries.append("Three.js")
+    elif "pixi" in html_lower:
+        engine = "pixijs"
+        libraries.append("PixiJS")
+    elif "matter" in html_lower:
+        engine = "matter.js"
+        libraries.append("Matter.js")
+        
+    baseline = {
+        "slug": slug,
+        "engine": engine,
+        "libraries": libraries,
+        "architecture": "modular" if len(files) > 3 else "starter-loop",
+        "files": files,
+        "systems": ["rendering", "game_loop", "input_handling"],
+        "controls": ["keyboard", "pointer"],
+        "known_bugs": [],
+        "design_decisions": [],
+        "creator_preferences": [],
+        "performance_targets": {"fps": 60, "resolution": "responsive"},
+        "current_build": 1,
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }
+    return baseline
+
+def update_project_manifest(user_id: int, slug: str, updates: dict) -> dict:
+    """
+    Merges updates into project_manifest.json and saves to disk.
+    """
+    manifest = get_project_manifest(user_id, slug)
+    for k, v in updates.items():
+        if k in ["known_bugs", "design_decisions", "creator_preferences", "systems", "controls", "libraries"]:
+            if isinstance(v, list):
+                existing_list = manifest.get(k, [])
+                for item in v:
+                    if item not in existing_list:
+                        existing_list.append(item)
+                manifest[k] = existing_list
+            elif isinstance(v, str):
+                existing_list = manifest.get(k, [])
+                if v not in existing_list:
+                    existing_list.append(v)
+                manifest[k] = existing_list
+        else:
+            manifest[k] = v
+            
+    manifest["files"] = list_project_files(user_id, slug)
+    manifest["updated_at"] = datetime.now(timezone.utc).isoformat()
+    
+    write_project_file(user_id, slug, "project_manifest.json", json.dumps(manifest, indent=2))
+    return manifest
+
+def validate_project(user_id: int, slug: str) -> dict:
+    """
+    Validates project structure, integrity, references, and security.
+    Returns diagnostic report: { "valid": bool, "errors": [...], "warnings": [...], ... }
+    """
+    errors = []
+    warnings = []
+    files = list_project_files(user_id, slug)
+    
+    if "index.html" not in files:
+        errors.append("Critical: 'index.html' is missing from the project root.")
+        
+    html_content = read_project_file(user_id, slug, "index.html") if "index.html" in files else ""
+    detected_engine = "canvas2d"
+    detected_libs = []
+    
+    if html_content:
+        if "<!DOCTYPE" not in html_content and "<!doctype" not in html_content:
+            warnings.append("Missing <!DOCTYPE html> declaration in index.html.")
+            
+        script_srcs = re.findall(r'<script\s+[^>]*src=["\']([^"\']+)["\']', html_content, re.IGNORECASE)
+        for src in script_srcs:
+            if src.startswith("http://") or src.startswith("https://") or src.startswith("//"):
+                src_lower = src.lower()
+                if "phaser" in src_lower:
+                    detected_engine = "phaser"
+                    detected_libs.append("Phaser")
+                elif "three" in src_lower:
+                    detected_engine = "three.js"
+                    detected_libs.append("Three.js")
+                elif "pixi" in src_lower:
+                    detected_engine = "pixijs"
+                    detected_libs.append("PixiJS")
+                elif "matter" in src_lower:
+                    detected_libs.append("Matter.js")
+                elif "howler" in src_lower:
+                    detected_libs.append("Howler.js")
+            else:
+                clean_ref = src.split("?")[0].lstrip("/")
+                if clean_ref not in files:
+                    errors.append(f"Broken script reference in index.html: '{src}' does not exist.")
+                    
+        link_hrefs = re.findall(r'<link\s+[^>]*href=["\']([^"\']+)["\']', html_content, re.IGNORECASE)
+        for href in link_hrefs:
+            if not (href.startswith("http://") or href.startswith("https://") or href.startswith("//")):
+                clean_ref = href.split("?")[0].lstrip("/")
+                if clean_ref not in files and not href.endswith(".ico"):
+                    errors.append(f"Broken stylesheet reference in index.html: '{href}' does not exist.")
+                    
+        if "<canvas" not in html_content.lower() and detected_engine == "canvas2d":
+            warnings.append("No <canvas> element found in index.html for Canvas 2D game.")
+            
+    for f in files:
+        if f.endswith(".js"):
+            js_code = read_project_file(user_id, slug, f)
+            open_curly = js_code.count("{")
+            close_curly = js_code.count("}")
+            if open_curly != close_curly:
+                warnings.append(f"Potential syntax warning in '{f}': unbalanced curly braces ({open_curly} open vs {close_curly} close).")
+                
+            open_paren = js_code.count("(")
+            close_paren = js_code.count(")")
+            if open_paren != close_paren:
+                warnings.append(f"Potential syntax warning in '{f}': unbalanced parentheses ({open_paren} open vs {close_paren} close).")
+                
+            for pattern in DANGEROUS_PATTERNS:
+                if pattern.search(js_code):
+                    warnings.append(f"Security flag in '{f}': pattern '{pattern.pattern}' detected.")
+                    
+            if re.search(r'while\s*\(\s*true\s*\)\s*\{(?:(?!break).)*\}', js_code, re.DOTALL):
+                warnings.append(f"Performance warning in '{f}': potential unbounded while(true) loop detected.")
+                
+    pdir = get_user_project_dir(user_id, slug)
+    total_size = get_project_size(pdir)
+    
+    return {
+        "valid": len(errors) == 0,
+        "errors": errors,
+        "warnings": warnings,
+        "files_checked": files,
+        "detected_engine": detected_engine,
+        "libraries": list(set(detected_libs)),
+        "stats": {
+            "total_files": len(files),
+            "total_size_bytes": total_size
+        }
+    }
 
 def delete_project_dir(user_id: int, slug: str) -> bool:
     try:

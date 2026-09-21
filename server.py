@@ -782,39 +782,61 @@ async def start_gemini_live_session(ws: web.WebSocketResponse, slug: str, sessio
         files_context_str = "\n".join(files_context_parts) if files_context_parts else "No files created yet."
 
         creator_name = session_user.get('username', 'creator')
-        live_sys_prompt = f"""You are Gemini 3.8 Live Extended Thinking on High, an interactive AI Game Architect and pair-programming co-pilot inside Yulya Studio. You are speaking in real-time to the creator @{creator_name} who is building an HTML5 Canvas web game named '{slug}'. 
+        manifest_data = projects_manager.get_project_manifest(user_id, slug)
+        manifest_summary = json.dumps(manifest_data, indent=2)
+
+        live_sys_prompt = f"""You are Gemini 3.8 Live Extended Thinking on High, the Creative Director & Principal Game Architect inside Yulya Studio.
+You are speaking in real-time to creator @{creator_name} who is building a web game project named '{slug}'.
+
+**Your Role as Creative Director & Game Architect:**
+You are the creative brain, technical director, and pair-programming co-pilot. You lead game design, recommend technology architectures, inspect project code and build progress via your tools, draft precise engineering prompts for Antigravity (the coding engine), and actively observe gameplay via 1080p screenshare.
 
 **Workflow & Guidelines:**
 
-1. **Design Interview:** When the creator describes an idea, ask smart, specific questions to flesh out the game. Focus on mechanics, aesthetics, controls, enemies, power-ups, scoring, etc. Always offer multiple clear options (e.g. “Do you want Neon Cyberpunk visuals or retro pixel art?”). Ask 1-2 questions at a time until the game plan is complete.
+1. **Design Interview & Option Offering:**
+   - When the creator describes an idea, ask smart, focused questions.
+   - Proactively recommend tech stacks:
+     * 2D Action/Platformer/Arcade -> Phaser 3 (via CDN)
+     * 3D Worlds/First-Person/Space -> Three.js (via CDN)
+     * Visual FX/Particles -> PixiJS
+     * Physics simulation -> Matter.js
+     * Audio & SFX -> Howler.js
+     * Retro/Classic -> HTML5 Canvas 2D
+   - Offer clear, creative choices (e.g. "Do you want high-speed cyberpunk aesthetics or dark atmospheric creature horror?"). Ask 1-2 questions at a time.
+   - Call `save_design_decision(decision=...)` or `remember_creator_preference(preference=...)` when key decisions or preferences are established.
 
-2. **Drafting Build Prompt:** Once the game idea is fully specified, ask the creator if you should draft the engineering prompt for Antigravity. If they agree:
-   - Execute the tool `draft_prompt_to_input(prompt=...)` with a detailed build specification you create. Include all game requirements and architecture decisions (not just partial instructions).
-   - Tell the creator: “I’ve drafted the complete build prompt in your command box. You can review and edit it or say ‘send it’ to run it on Antigravity.”
-   - If the creator asks, you **read the full prompt aloud** and ask for confirmation.
+2. **Project Inspection & Real-Time Awareness:**
+   - Use your toolbelt: `get_project_summary()`, `list_project_files()`, `read_project_file(path=...)`, `search_project(query=...)`, `get_current_build()`, `validate_project()`.
+   - When the creator asks "What does my game look like under the hood?" or "Why is this behaving strangely?", inspect the files or check validation diagnostics first!
 
-3. **Sending to Antigravity:** When the creator confirms (by voice “send it” or pressing Enter):
-   - Call `send_prompt_to_antigravity(instruction=...)` with the final prompt.
-   - Announce: “Sending your build prompt to the code engine now! It’s compiling the game in the background.” 
+3. **Drafting the Antigravity Engineering Prompt:**
+   - Once the design or bug fix is clear, draft a comprehensive engineering specification.
+   - Call `draft_prompt_to_input(prompt=...)` to populate their on-screen command box.
+   - Tell the creator: "I've drafted the complete specification in your command box. Review it, edit it, or say 'send it' to build it."
+   - If requested, read the prompt aloud.
 
-4. **Chat While Building:** After sending, you can continue talking naturally. Brainstorm extra features, future ideas, or explain design choices. This does not interrupt the background build.
+4. **Sending to Antigravity:**
+   - When the creator confirms ("send it", "build it", or presses Enter), call `send_prompt_to_antigravity(instruction=...)`.
+   - Announce: "Sending to Antigravity now! Compiling in the background."
 
-5. **Testing & Iteration:** When Antigravity finishes building, you receive a notification. Congratulate the creator, invite them to test the game in the preview, and suggest they click **Screenshare** so you can watch them play. Observe and provide feedback. If they want changes, repeat the process: `draft_prompt_to_input(...)`, ask, then `send_prompt_to_antigravity(...)`.
+5. **Chat While Building:**
+   - Antigravity builds in the background without blocking our conversation. Continue discussing lore, sound design, extra levels, or mechanics.
 
-6. **Transcript Logging:** The creator sees a live chat transcript. **Every time you speak in voice**, also call `post_chat_message(message=...)` with your spoken text so it appears in their chat window in markdown. This keeps the audio and text in sync.
+6. **Active Gameplay Observation Loop (Screenshare):**
+   - When the build completes, invite the creator to play in the preview window and click **Screenshare** (streaming at 1080p 2 FPS).
+   - As you receive visual frames of their gameplay, actively critique and advise:
+     * Point out UI/HUD collisions or readability issues
+     * Check enemy attack cadence, player speed, and collision feedback
+     * Suggest particle effects, sound cues, or difficulty tweaks
+     * If you spot a bug or glitch, say so and offer to draft a fix immediately!
 
-**Permitted Scope:**
+7. **Synchronized Transcript Logging:**
+   - Every time you speak in voice, call `post_chat_message(message=...)` with your spoken message so it appears cleanly in the creator's chat transcript.
 
-- You *know* the current code files (HTML, CSS, JS) but you cannot edit them yourself. You only instruct and design.
-- Remember: Antigravity can now create multiple files in the project folder (scripts, assets, etc.). Feel free to mention splitting code into modules or adding assets.
-- **Do NOT** try to access any file outside the game directory. You have **no direct file or database access**. Use the tools provided.
+**Current Project Manifest Memory:**
+{manifest_summary}
 
-**Tools Available:**
-- `post_chat_message(message: str)`
-- `draft_prompt_to_input(prompt: str)`
-- `send_prompt_to_antigravity(instruction: str)`
-
-Current Game Repository Files:
+**Current Game Repository Files:**
 {files_context_str}
 """
 
@@ -862,6 +884,90 @@ Current Game Repository Files:
                             "instruction": types.Schema(type="STRING", description="Detailed code modification instruction")
                         },
                         required=["instruction"]
+                    )
+                ),
+                types.FunctionDeclaration(
+                    name="get_project_summary",
+                    description="Returns the project manifest memory (engine, architecture, systems, controls, known bugs, design decisions, current build) and file listing.",
+                    parameters=types.Schema(
+                        type="OBJECT",
+                        properties={}
+                    )
+                ),
+                types.FunctionDeclaration(
+                    name="list_project_files",
+                    description="Lists all files in the current game project repository.",
+                    parameters=types.Schema(
+                        type="OBJECT",
+                        properties={}
+                    )
+                ),
+                types.FunctionDeclaration(
+                    name="read_project_file",
+                    description="Reads the text content of a specific file in the current game project (e.g. 'index.html', 'src/game.js', 'project_manifest.json').",
+                    parameters=types.Schema(
+                        type="OBJECT",
+                        properties={
+                            "path": types.Schema(type="STRING", description="Relative path of the project file to read.")
+                        },
+                        required=["path"]
+                    )
+                ),
+                types.FunctionDeclaration(
+                    name="search_project",
+                    description="Searches across all text files in the project for a keyword, variable, function, or mechanic.",
+                    parameters=types.Schema(
+                        type="OBJECT",
+                        properties={
+                            "query": types.Schema(type="STRING", description="Search term or phrase to look for across the project files.")
+                        },
+                        required=["query"]
+                    )
+                ),
+                types.FunctionDeclaration(
+                    name="get_current_build",
+                    description="Returns recent build log entries from Antigravity to see build status, steps taken, and recent diffs.",
+                    parameters=types.Schema(
+                        type="OBJECT",
+                        properties={}
+                    )
+                ),
+                types.FunctionDeclaration(
+                    name="get_known_bugs",
+                    description="Retrieves known bugs and unresolved issues recorded in the project manifest memory.",
+                    parameters=types.Schema(
+                        type="OBJECT",
+                        properties={}
+                    )
+                ),
+                types.FunctionDeclaration(
+                    name="validate_project",
+                    description="Runs diagnostics on the project to detect broken references, missing tags, syntax warnings, or security issues.",
+                    parameters=types.Schema(
+                        type="OBJECT",
+                        properties={}
+                    )
+                ),
+                types.FunctionDeclaration(
+                    name="save_design_decision",
+                    description="Persists a key design decision (e.g. 'cyberpunk dark theme', 'boss spawns at 500 score') into the project manifest memory.",
+                    parameters=types.Schema(
+                        type="OBJECT",
+                        properties={
+                            "decision": types.Schema(type="STRING", description="The game design decision to record and remember.")
+                        },
+                        required=["decision"]
+                    )
+                ),
+                types.FunctionDeclaration(
+                    name="remember_creator_preference",
+                    description="Remembers a specific creator style preference (e.g. 'wants fast movement', 'dislikes retro pixel art') in project memory.",
+                    parameters=types.Schema(
+                        type="OBJECT",
+                        properties={
+                            "preference": types.Schema(type="STRING", description="The creator preference to remember across sessions.")
+                        },
+                        required=["preference"]
                     )
                 )
             ]
@@ -1129,6 +1235,158 @@ async def _live_receive_loop(ws: web.WebSocketResponse, slug: str, session, api_
 
                                 # Run code generation in background without freezing voice streaming
                                 asyncio.create_task(_run_antigravity_builder(slug, session_user, api_key, instruction, ws, session))
+
+                            elif fc.name == "get_project_summary":
+                                user_id_val = int(session_user.get("id") or session_user.get("user_id", 0))
+                                manifest = projects_manager.get_project_manifest(user_id_val, slug)
+                                pfiles = projects_manager.list_project_files(user_id_val, slug)
+                                await broadcast_project_log(slug, f"[TOOL] Live AI inspected project summary: {len(pfiles)} files, engine: {manifest.get('engine')}", "tool")
+                                tool_resp = types.LiveClientToolResponse(
+                                    function_responses=[
+                                        types.FunctionResponse(
+                                            name="get_project_summary",
+                                            id=fc.id,
+                                            response={"manifest": manifest, "files": pfiles}
+                                        )
+                                    ]
+                                )
+                                try: await session.send(input=tool_resp)
+                                except Exception as e: print(f"[LIVE TOOL SEND ERROR] {e}")
+
+                            elif fc.name == "list_project_files":
+                                user_id_val = int(session_user.get("id") or session_user.get("user_id", 0))
+                                pfiles = projects_manager.list_project_files(user_id_val, slug)
+                                await broadcast_project_log(slug, f"[TOOL] Live AI listed files: {', '.join(pfiles[:5])}", "tool")
+                                tool_resp = types.LiveClientToolResponse(
+                                    function_responses=[
+                                        types.FunctionResponse(
+                                            name="list_project_files",
+                                            id=fc.id,
+                                            response={"files": pfiles}
+                                        )
+                                    ]
+                                )
+                                try: await session.send(input=tool_resp)
+                                except Exception as e: print(f"[LIVE TOOL SEND ERROR] {e}")
+
+                            elif fc.name == "read_project_file":
+                                user_id_val = int(session_user.get("id") or session_user.get("user_id", 0))
+                                fpath = fc.args.get("path", "").strip()
+                                fcontent = projects_manager.read_project_file(user_id_val, slug, fpath)
+                                await broadcast_project_log(slug, f"[TOOL] Live AI read file '{fpath}' ({len(fcontent)} chars)", "tool")
+                                tool_resp = types.LiveClientToolResponse(
+                                    function_responses=[
+                                        types.FunctionResponse(
+                                            name="read_project_file",
+                                            id=fc.id,
+                                            response={"path": fpath, "content": fcontent[:4000]}
+                                        )
+                                    ]
+                                )
+                                try: await session.send(input=tool_resp)
+                                except Exception as e: print(f"[LIVE TOOL SEND ERROR] {e}")
+
+                            elif fc.name == "search_project":
+                                user_id_val = int(session_user.get("id") or session_user.get("user_id", 0))
+                                query_str = fc.args.get("query", "").strip()
+                                search_matches = projects_manager.search_project_files(user_id_val, slug, query_str)
+                                await broadcast_project_log(slug, f"[TOOL] Live AI searched for '{query_str}' -> {len(search_matches)} matches", "tool")
+                                tool_resp = types.LiveClientToolResponse(
+                                    function_responses=[
+                                        types.FunctionResponse(
+                                            name="search_project",
+                                            id=fc.id,
+                                            response={"query": query_str, "matches": search_matches}
+                                        )
+                                    ]
+                                )
+                                try: await session.send(input=tool_resp)
+                                except Exception as e: print(f"[LIVE TOOL SEND ERROR] {e}")
+
+                            elif fc.name == "get_current_build":
+                                user_id_val = int(session_user.get("id") or session_user.get("user_id", 0))
+                                build_logs = projects_manager.read_build_log(user_id_val, slug, max_lines=15)
+                                await broadcast_project_log(slug, f"[TOOL] Live AI retrieved recent build logs ({len(build_logs)} entries)", "tool")
+                                tool_resp = types.LiveClientToolResponse(
+                                    function_responses=[
+                                        types.FunctionResponse(
+                                            name="get_current_build",
+                                            id=fc.id,
+                                            response={"build_logs": build_logs}
+                                        )
+                                    ]
+                                )
+                                try: await session.send(input=tool_resp)
+                                except Exception as e: print(f"[LIVE TOOL SEND ERROR] {e}")
+
+                            elif fc.name == "get_known_bugs":
+                                user_id_val = int(session_user.get("id") or session_user.get("user_id", 0))
+                                manifest = projects_manager.get_project_manifest(user_id_val, slug)
+                                bugs = manifest.get("known_bugs", [])
+                                await broadcast_project_log(slug, f"[TOOL] Live AI retrieved known bugs: {len(bugs)} found", "tool")
+                                tool_resp = types.LiveClientToolResponse(
+                                    function_responses=[
+                                        types.FunctionResponse(
+                                            name="get_known_bugs",
+                                            id=fc.id,
+                                            response={"known_bugs": bugs}
+                                        )
+                                    ]
+                                )
+                                try: await session.send(input=tool_resp)
+                                except Exception as e: print(f"[LIVE TOOL SEND ERROR] {e}")
+
+                            elif fc.name == "validate_project":
+                                user_id_val = int(session_user.get("id") or session_user.get("user_id", 0))
+                                val_report = projects_manager.validate_project(user_id_val, slug)
+                                await broadcast_project_log(slug, f"[TOOL] Live AI validated project: valid={val_report.get('valid')}, {len(val_report.get('errors', []))} errors", "tool")
+                                tool_resp = types.LiveClientToolResponse(
+                                    function_responses=[
+                                        types.FunctionResponse(
+                                            name="validate_project",
+                                            id=fc.id,
+                                            response=val_report
+                                        )
+                                    ]
+                                )
+                                try: await session.send(input=tool_resp)
+                                except Exception as e: print(f"[LIVE TOOL SEND ERROR] {e}")
+
+                            elif fc.name == "save_design_decision":
+                                user_id_val = int(session_user.get("id") or session_user.get("user_id", 0))
+                                decision_str = fc.args.get("decision", "").strip()
+                                if decision_str:
+                                    projects_manager.update_project_manifest(user_id_val, slug, {"design_decisions": [decision_str]})
+                                await broadcast_project_log(slug, f"[TOOL] Live AI saved design decision: \"{decision_str[:60]}...\"", "tool")
+                                tool_resp = types.LiveClientToolResponse(
+                                    function_responses=[
+                                        types.FunctionResponse(
+                                            name="save_design_decision",
+                                            id=fc.id,
+                                            response={"status": "saved", "decision": decision_str}
+                                        )
+                                    ]
+                                )
+                                try: await session.send(input=tool_resp)
+                                except Exception as e: print(f"[LIVE TOOL SEND ERROR] {e}")
+
+                            elif fc.name == "remember_creator_preference":
+                                user_id_val = int(session_user.get("id") or session_user.get("user_id", 0))
+                                pref_str = fc.args.get("preference", "").strip()
+                                if pref_str:
+                                    projects_manager.update_project_manifest(user_id_val, slug, {"creator_preferences": [pref_str]})
+                                await broadcast_project_log(slug, f"[TOOL] Live AI remembered preference: \"{pref_str[:60]}...\"", "tool")
+                                tool_resp = types.LiveClientToolResponse(
+                                    function_responses=[
+                                        types.FunctionResponse(
+                                            name="remember_creator_preference",
+                                            id=fc.id,
+                                            response={"status": "remembered", "preference": pref_str}
+                                        )
+                                    ]
+                                )
+                                try: await session.send(input=tool_resp)
+                                except Exception as e: print(f"[LIVE TOOL SEND ERROR] {e}")
             except asyncio.CancelledError:
                 break
             except Exception as turn_err:
