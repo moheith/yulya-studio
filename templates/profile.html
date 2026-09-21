@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/studio.css?v=20260920">
+  <link rel="stylesheet" href="/static/css/studio.css?v=20260921_04">
   <style>
     body {
       min-height: 100vh;
@@ -383,10 +383,16 @@
       line-height: 1.5;
     }
 
+    .modal-backdrop {
+      display: none !important;
+      pointer-events: none !important;
+    }
+
     .modal-backdrop.open,
     .modal-backdrop.show {
+      display: flex !important;
       opacity: 1;
-      pointer-events: auto;
+      pointer-events: auto !important;
     }
 
     .modal-backdrop.open .modal-content,

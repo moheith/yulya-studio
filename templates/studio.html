@@ -7,8 +7,18 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/studio.css?v=20260920">
+  <link rel="stylesheet" href="/static/css/studio.css?v=20260921_04">
   <style>
+    /* Infallible Modal Backdrop Guard: Prevents backdrops from blocking clicks when closed */
+    .modal-backdrop {
+      display: none !important;
+      pointer-events: none !important;
+    }
+    .modal-backdrop.open {
+      display: flex !important;
+      pointer-events: auto !important;
+    }
+
     body {
       height: 100vh;
       display: flex;
@@ -788,11 +798,6 @@
         <span id="liveStatusText">Gemini 3.8 Live (Offline)</span>
       </div>
 
-      <!-- Antigravity Coding Waterfall Pill -->
-      <div class="status-pill waterfall-pill" title="Antigravity Coding Waterfall: Gemini 3.8 Flash multi-model waterfall">
-        <span class="status-dot online"></span>
-        <span>Waterfall: 3.8 Flash</span>
-      </div>
 
       <!-- Live AI Connect Toggle Button -->
       <button type="button" class="btn-live-toggle" id="liveToggleBtn" onclick="toggleLiveAI()">
@@ -872,7 +877,7 @@
           <div class="log-line">
             <span class="log-time">00:00:00</span>
             <span class="log-badge thinking">AI</span>
-            <span class="log-msg">Antigravity Coding Engine ready. Waterfall multi-model active.</span>
+            <span class="log-msg">Antigravity Coding Engine ready. Gemini 3.8 active.</span>
           </div>
         </div>
       </div>
@@ -1080,38 +1085,91 @@
     </div>
   </div>
 
-  <script src="/static/js/studio.js?v=20260920"></script>
+  <script src="/static/js/studio.js?v=20260921_04"></script>
   <script>
     const USERNAME = "{{ user.username }}";
     const ACTIVE_SLUG = "{{ active_slug }}";
     const SPECTATOR_TOKEN = "{{ spectator_token }}";
 
-    // Populate Icons defensively
-    function safeSetIcon(id, html) {
-      const el = document.getElementById(id);
-      if (el) el.innerHTML = html;
+    // Defensively ensure ToastManager, ModalManager, and copyToClipboard exist
+    if (typeof window.ToastManager === 'undefined') {
+      window.ToastManager = {
+        show(msg, type = 'info') { console.log(`[TOAST:${type}]`, msg); }
+      };
+    }
+    if (typeof window.ModalManager === 'undefined') {
+      window.ModalManager = {
+        open(id) { const el = document.getElementById(id); if (el) el.classList.add('open'); },
+        close(id) { const el = document.getElementById(id); if (el) el.classList.remove('open'); },
+        closeAll() { document.querySelectorAll('.modal-backdrop.open').forEach(el => el.classList.remove('open')); }
+      };
+    }
+    if (typeof window.copyToClipboard === 'undefined') {
+      window.copyToClipboard = (text, msg = 'Copied') => {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(() => ToastManager.show(msg, 'success')).catch(() => {});
+        }
+      };
     }
 
-    safeSetIcon('folderIcon', Icons.file('icon-sm'));
-    safeSetIcon('shareIcon', Icons.share('icon-sm'));
-    safeSetIcon('downloadIcon', Icons.download('icon-sm'));
-    safeSetIcon('logoutIcon', Icons.logout('icon-sm'));
-    safeSetIcon('chatTabIcon', Icons.chat('icon-sm'));
-    safeSetIcon('antigravityTabIcon', Icons.cpu('icon-sm'));
-    safeSetIcon('terminalTabIcon', Icons.terminal('icon-sm'));
-    safeSetIcon('refreshIcon', Icons.refresh('icon-sm'));
-    safeSetIcon('screenIcon', Icons.screen('icon-sm'));
-    safeSetIcon('externalIcon', Icons.external('icon-sm'));
-    safeSetIcon('maxIcon', Icons.maximize('icon-sm'));
-    safeSetIcon('micIcon', Icons.mic('icon'));
-    safeSetIcon('sendIcon', Icons.send('icon-sm'));
-    safeSetIcon('copyIcon', Icons.copy('icon-sm'));
-    safeSetIcon('closeProjIcon', Icons.x('icon-sm'));
-    safeSetIcon('closeNewProjIcon', Icons.x('icon-sm'));
-    safeSetIcon('closeDelIcon', Icons.x('icon-sm'));
-    safeSetIcon('closeLeaveIcon', Icons.x('icon-sm'));
-    safeSetIcon('liveIcon', Icons.play('icon-sm'));
-    safeSetIcon('paletteSearchIcon', Icons.terminal('icon-sm'));
+    // Comprehensive Fallback Icons Map ensures UI icons never fail even on cached/blocked scripts
+    const STUDIO_FALLBACK_ICONS = {
+      play: (cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>`,
+      refresh: (cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>`,
+      share: (cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>`,
+      logout: (cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>`,
+      terminal: (cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>`,
+      code: (cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`,
+      file: (cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>`,
+      mic: (cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>`,
+      send: (cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>`,
+      screen: (cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`,
+      download: (cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`,
+      plus: (cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
+      copy: (cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`,
+      external: (cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>`,
+      maximize: (cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>`,
+      x: (cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
+      chat: (cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`,
+      cpu: (cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg>`
+    };
+
+    // Populate Icons defensively without throwing under any circumstance
+    function safeSetIcon(id, iconName, cls = 'icon-sm') {
+      try {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const iconFn = (typeof Icons !== 'undefined' && Icons && typeof Icons[iconName] === 'function')
+          ? Icons[iconName]
+          : STUDIO_FALLBACK_ICONS[iconName];
+        if (iconFn) {
+          el.innerHTML = iconFn(cls);
+        }
+      } catch (err) {
+        console.warn('safeSetIcon notice:', id, iconName, err);
+      }
+    }
+
+    safeSetIcon('folderIcon', 'file');
+    safeSetIcon('shareIcon', 'share');
+    safeSetIcon('downloadIcon', 'download');
+    safeSetIcon('logoutIcon', 'logout');
+    safeSetIcon('chatTabIcon', 'chat');
+    safeSetIcon('antigravityTabIcon', 'cpu');
+    safeSetIcon('terminalTabIcon', 'terminal');
+    safeSetIcon('refreshIcon', 'refresh');
+    safeSetIcon('screenIcon', 'screen');
+    safeSetIcon('externalIcon', 'external');
+    safeSetIcon('maxIcon', 'maximize');
+    safeSetIcon('micIcon', 'mic', 'icon');
+    safeSetIcon('sendIcon', 'send');
+    safeSetIcon('copyIcon', 'copy');
+    safeSetIcon('closeProjIcon', 'x');
+    safeSetIcon('closeNewProjIcon', 'x');
+    safeSetIcon('closeDelIcon', 'x');
+    safeSetIcon('closeLeaveIcon', 'x');
+    safeSetIcon('liveIcon', 'play');
+    safeSetIcon('paletteSearchIcon', 'terminal');
 
     // Studio State
     let activeTab = 'chat'; // 'chat' is default active tab
@@ -1128,6 +1186,7 @@
     let heartbeatInterval = null;
     let screenStream = null;
     let screenInterval = null;
+    let pendingLiveConnect = false;
 
     // Live Voice State - Default PTT
     let isLiveConnected = false;
@@ -1703,6 +1762,12 @@
             executeCommand(prompt);
           }
 
+          // Auto-trigger Live AI connection if user clicked before WS finished connecting
+          if (pendingLiveConnect) {
+            pendingLiveConnect = false;
+            toggleLiveAI();
+          }
+
           if (heartbeatInterval) clearInterval(heartbeatInterval);
           heartbeatInterval = setInterval(() => {
             if (ws && ws.readyState === WebSocket.OPEN) {
@@ -1883,12 +1948,18 @@
     // Toggle Gemini Live Voice Connection
     function toggleLiveAI() {
       if (!ws || ws.readyState !== WebSocket.OPEN) {
+        pendingLiveConnect = true;
+        setLiveStatus('Connecting to Studio server...', 'connecting');
+        updateLiveButton(false, true);
         ToastManager.show('Connecting to Studio server...', 'info');
-        connectWS();
+        if (!ws || ws.readyState === WebSocket.CLOSED) {
+          connectWS();
+        }
         return;
       }
 
       if (isLiveConnected) {
+        pendingLiveConnect = false;
         ws.send(JSON.stringify({ type: 'disconnect_live' }));
         liveAudioPlayer.stop();
         stopMicrophone();
@@ -2050,14 +2121,18 @@
       }
     }
 
-    // --- Push-to-Talk Handling (Hold Space to Talk) ---
+    // --- Push-to-Talk Handling (Hold Space or Click to Talk) ---
     const pttBtn = document.getElementById('pttBtn');
+    let pttPressStartTime = 0;
+    let isPTTToggledOn = false;
+    let micInitPromise = null;
 
     async function activatePTT() {
       if (isPTTActive || voiceMode !== 'ptt') return;
 
       if (!isLiveConnected) {
-        ToastManager.show('Connecting Live AI first... please hold on', 'info');
+        ToastManager.show('Connecting Live AI first... please wait a moment', 'info');
+        pendingLiveConnect = true;
         toggleLiveAI();
         return;
       }
@@ -2067,7 +2142,7 @@
       currentSpeechTranscript = '';
       if (pttBtn) pttBtn.classList.add('recording');
       const label = document.getElementById('pttLabel');
-      if (label) label.textContent = 'Listening... (Release)';
+      if (label) label.textContent = 'Listening... (Click/Release to Send)';
 
       // Immediately stop any AI voice audio to allow clean interruption
       liveAudioPlayer.stop();
@@ -2081,17 +2156,27 @@
         } catch (e) {}
       }
 
-      const ok = await startMicrophone();
+      micInitPromise = startMicrophone();
+      const ok = await micInitPromise;
       if (ok && isPTTActive) {
         setLiveStatus('Listening to you...', 'listening');
         animateWaveform('listening');
       }
     }
 
-    function deactivatePTT() {
+    async function deactivatePTT() {
       if (!isPTTActive || voiceMode !== 'ptt') return;
+
+      // If microphone is still initializing, wait for it so audio stream finishes cleanly
+      if (micInitPromise) {
+        try { await micInitPromise; } catch (e) {}
+        micInitPromise = null;
+      }
+
       isPTTActive = false;
       isListening = false;
+      isPTTToggledOn = false;
+      isSpaceToggledOn = false;
       if (pttBtn) pttBtn.classList.remove('recording');
       const label = document.getElementById('pttLabel');
       if (label) label.textContent = 'Hold Space to Talk';
@@ -2123,15 +2208,47 @@
     }
 
     if (pttBtn) {
-      pttBtn.addEventListener('mousedown', activatePTT);
-      pttBtn.addEventListener('mouseup', deactivatePTT);
-      pttBtn.addEventListener('mouseleave', deactivatePTT);
+      pttBtn.addEventListener('mousedown', (e) => {
+        pttPressStartTime = Date.now();
+        if (isPTTToggledOn) {
+          deactivatePTT();
+        } else {
+          activatePTT();
+        }
+      });
+
+      pttBtn.addEventListener('mouseup', (e) => {
+        const duration = Date.now() - pttPressStartTime;
+        if (duration >= 350) {
+          // Held down like a traditional walkie-talkie
+          deactivatePTT();
+        } else {
+          // Quick click! Keep recording open in toggle mode so user can speak comfortably
+          isPTTToggledOn = true;
+          const label = document.getElementById('pttLabel');
+          if (label) label.textContent = 'Listening... (Click to Send)';
+        }
+      });
+
+      pttBtn.addEventListener('mouseleave', (e) => {
+        if (isPTTActive && !isPTTToggledOn) {
+          deactivatePTT();
+        }
+      });
     }
+
+    let spacePressStartTime = 0;
+    let isSpaceToggledOn = false;
 
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Space' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA' && !e.repeat && voiceMode === 'ptt') {
         e.preventDefault();
-        activatePTT();
+        spacePressStartTime = Date.now();
+        if (isSpaceToggledOn) {
+          deactivatePTT();
+        } else {
+          activatePTT();
+        }
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
@@ -2142,7 +2259,14 @@
     window.addEventListener('keyup', (e) => {
       if (e.code === 'Space' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA' && voiceMode === 'ptt') {
         e.preventDefault();
-        deactivatePTT();
+        const duration = Date.now() - spacePressStartTime;
+        if (duration >= 350) {
+          deactivatePTT();
+        } else {
+          isSpaceToggledOn = true;
+          const label = document.getElementById('pttLabel');
+          if (label) label.textContent = 'Listening... (Press Space to Send)';
+        }
       }
     });
 
