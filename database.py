@@ -63,7 +63,7 @@ async def init_db():
 async def verify_google_ai_studio_key(api_key: str) -> tuple[bool, str]:
     """
     Verifies that the provided Google AI Studio API key is valid by sending a minimal ping request.
-    Uses gemma-4-31b-it as primary check with gemini-2.5-flash fallback.
+    Uses gemma-4-26b-it / gemini-3.5-flash-lite as primary checks with multi-model fallback cascade.
     Returns (is_valid, message).
     """
     if not api_key or not isinstance(api_key, str) or len(api_key.strip()) < 15:
@@ -74,11 +74,12 @@ async def verify_google_ai_studio_key(api_key: str) -> tuple[bool, str]:
     def _test_call():
         client = genai.Client(api_key=cleaned_key)
         for model_name in [
+            "gemma-4-26b-it",
+            "gemini-3.5-flash-lite",
             "gemini-3.8-flash",
             "gemini-3.7-flash",
             "gemini-3.6-flash",
             "gemini-3.5-flash",
-            "gemini-3.5-flash-lite",
             "gemini-3.1-flash-lite",
             "gemma-4-31b-it",
             "gemini-2.5-flash"
