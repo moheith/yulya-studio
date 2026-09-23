@@ -977,7 +977,7 @@
           <button class="btn btn-outline btn-sm" onclick="restartPreview()" title="Restart Game">
             <span id="refreshIcon"></span> Restart
           </button>
-          <button class="btn btn-outline btn-sm" id="screenShareBtn" onclick="toggleScreenShare()" title="Stream screen to Gemini Live & spectators">
+          <button class="btn btn-outline btn-sm" id="screenShareBtn" onclick="toggleScreenShare()" title="Stream screen to Gemini Live">
             <span id="screenIcon"></span> Screenshare
           </button>
           <button class="btn btn-outline btn-sm" onclick="openGameNewTab()" title="Open in new tab">
@@ -1101,7 +1101,7 @@
         <button class="btn btn-outline btn-sm btn-icon" onclick="ModalManager.close('leaveModal')"><span id="closeLeaveIcon"></span></button>
       </div>
       <div class="modal-body">
-        Return to your profile? All game files and spectator links remain safely preserved.
+        Return to your profile? All game files remain safely preserved.
       </div>
       <div class="modal-actions">
         <button class="btn btn-secondary btn-sm" onclick="ModalManager.close('leaveModal')">Cancel</button>
@@ -1141,7 +1141,6 @@
   <script>
     const USERNAME = "{{ user.username }}";
     const ACTIVE_SLUG = "{{ active_slug }}";
-    const SPECTATOR_TOKEN = "{{ spectator_token }}";
 
     // Defensively ensure ToastManager, ModalManager, and copyToClipboard exist
     if (typeof window.ToastManager === 'undefined') {
@@ -2012,6 +2011,12 @@
               ToastManager.show(data.message, 'error');
               setLiveStatus('Gemini 3.8 Live Error', 'offline');
               updateLiveButton(false);
+            } else if (data.type === 'interaction_status') {
+              if (data.status && data.status.toUpperCase().includes('IN_PROGRESS')) {
+                setLiveStatus('Extended Thinking (High)...', 'thinking');
+              } else if (data.status && data.status.toUpperCase().includes('IDLE')) {
+                setLiveStatus(voiceMode === 'continuous' ? 'Continuous Voice Active' : 'Gemini 3.8 Live Ready', voiceMode === 'continuous' ? 'listening' : 'online');
+              }
             } else if (data.type === 'code_update') {
               hideAntigravityLoader();
               logAntigravity(`[PASS] ${data.summary}`, 'pass');
@@ -2509,7 +2514,7 @@
       }
     }
 
-    // Screensharing (2 FPS 1080p vision to Gemini Live & spectators)
+    // Screensharing (2 FPS 1080p vision to Gemini Live)
     async function toggleScreenShare() {
       const btn = document.getElementById('screenShareBtn');
       const badge = document.getElementById('screenVisionBadge');
@@ -2654,10 +2659,8 @@
     }
 
     function shareProjectLink() {
-      const url = SPECTATOR_TOKEN
-        ? `${window.location.origin}/spectate/${SPECTATOR_TOKEN}`
-        : `${window.location.origin}/spectate/${USERNAME}/${ACTIVE_SLUG}`;
-      copyToClipboard(url, 'Spectator stream link copied to clipboard');
+      const url = `${window.location.origin}/${USERNAME}/${ACTIVE_SLUG}/`;
+      copyToClipboard(url, 'Game link copied to clipboard');
     }
 
     function downloadZip() {
@@ -2671,7 +2674,7 @@
       { id: 'restart_game', title: 'Restart Game Preview', shortcut: 'R', action: () => restartPreview() },
       { id: 'new_proj', title: 'Create New Game Repository', shortcut: 'Ctrl+N', action: () => openNewProjectModal() },
       { id: 'switch_proj', title: 'Switch Game Project', shortcut: 'P', action: () => toggleProjectModal() },
-      { id: 'share_game', title: 'Share Game Stream Link', shortcut: 'S', action: () => shareProjectLink() },
+      { id: 'share_game', title: 'Share Public Game Link', shortcut: 'S', action: () => shareProjectLink() },
       { id: 'download_zip', title: 'Download Project ZIP', shortcut: 'D', action: () => downloadZip() },
       { id: 'reconnect_ws', title: 'Reconnect WebSocket', shortcut: 'C', action: () => connectWS() },
       { id: 'toggle_terminal', title: 'Toggle Terminal / Code View', shortcut: 'T', action: () => switchTab(activeTab === 'terminal' ? 'app.js' : 'terminal') },

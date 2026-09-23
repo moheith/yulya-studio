@@ -171,7 +171,7 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
             # 4. gemini-3.5-flash
             # 5. gemini-3.1-flash-lite
             # 6. gemini-3.5-flash-lite
-            # (with gemini-2.5-flash and gemini-2.0-flash as resilient emergency fallbacks)
+            # (with gemini-2.5-flash as resilient emergency fallback)
             for model_name in [
                 "gemini-3.8-flash",
                 "gemini-3.7-flash",
@@ -179,15 +179,16 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
                 "gemini-3.5-flash",
                 "gemini-3.1-flash-lite",
                 "gemini-3.5-flash-lite",
-                "gemini-2.5-flash",
-                "gemini-2.0-flash"
+                "gemini-2.5-flash"
             ]:
                 try:
                     cfg_kwargs = {
                         "system_instruction": SYSTEM_PROMPT,
                         "response_mime_type": "application/json",
-                        "temperature": 0.4
                     }
+                    # Omit deprecated sampling parameters for Gemini 3.8 Flash per Google migration guide
+                    if not model_name.startswith("gemini-3.8"):
+                        cfg_kwargs["temperature"] = 0.4
                     response = client.models.generate_content(
                         model=model_name,
                         contents=json.dumps(context_payload),
@@ -374,14 +375,16 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
                             "gemini-2.5-flash"
                         ]:
                             try:
+                                rcfg_kwargs = {
+                                    "system_instruction": SYSTEM_PROMPT,
+                                    "response_mime_type": "application/json",
+                                }
+                                if not model_name.startswith("gemini-3.8"):
+                                    rcfg_kwargs["temperature"] = 0.2
                                 resp = client.models.generate_content(
                                     model=model_name,
                                     contents=json.dumps(repair_context),
-                                    config=types.GenerateContentConfig(
-                                        system_instruction=SYSTEM_PROMPT,
-                                        response_mime_type="application/json",
-                                        temperature=0.2
-                                    )
+                                    config=types.GenerateContentConfig(**rcfg_kwargs)
                                 )
                                 if resp and resp.text:
                                     return resp.text

@@ -21,9 +21,11 @@ import ai_engine
 # In-memory sessions cache: { session_token: { "user": user_dict, "created_at": float } }
 SESSION_STORE = {}
 
-# Active WebSocket connections:
-# { slug: { "creator": set([ws]), "spectators": set([ws]), "last_seen": { ws: float } } }
+# Active WebSocket connections: { slug: { "creator": set([ws]), "last_seen": { ws: float } } }
 ACTIVE_STUDIO_WS = {}
+
+# Active build admission controller: set of (user_id, slug) currently running builds
+ACTIVE_PROJECT_BUILDS = set()
 
 # Active Gemini 3.8 Live Extended Thinking sessions per creator WebSocket:
 # { ws: { "session": AsyncSession, "receive_task": asyncio.Task, "slug": str, "client": genai.Client } }
@@ -57,17 +59,39 @@ async def get_session_user(request: web.Request) -> dict | None:
     token = request.cookies.get(config.COOKIE_NAME) or request.query.get("token")
     if not token:
         return None
+    now = time.time()
+    
+    # Check in-memory store with 30-day TTL expiry (Section 12)
     if token in SESSION_STORE:
-        return SESSION_STORE[token].get("user")
+        sess = SESSION_STORE[token]
+        if now - sess.get("created_at", 0) > 86400 * 30:
+            del SESSION_STORE[token]
+            return None
+        return sess.get("user")
     
     # Check MongoDB sessions
     doc = await database.get_session(token)
     if doc:
-        SESSION_STORE[token] = doc
+        created_at = doc.get("created_at")
+        if isinstance(created_at, (int, float)) and (now - created_at > 86400 * 30):
+            await database.delete_session(token)
+            return None
+        SESSION_STORE[token] = {
+            "token": token,
+            "user": doc.get("user"),
+            "created_at": created_at if isinstance(created_at, (int, float)) else now
+        }
         return doc.get("user")
+        
+    # Periodic cleanup of expired memory entries if store grows large
+    if len(SESSION_STORE) > 1000:
+        expired_keys = [k for k, v in SESSION_STORE.items() if now - v.get("created_at", 0) > 86400 * 30]
+        for k in expired_keys:
+            del SESSION_STORE[k]
+            
     return None
 
-async def set_session_user(response: web.Response, user_data: dict) -> str:
+async def set_session_user(response: web.Response, user_data: dict, request: web.Request = None) -> str:
     token = secrets.token_urlsafe(32)
     session_payload = {
         "token": token,
@@ -77,13 +101,21 @@ async def set_session_user(response: web.Response, user_data: dict) -> str:
     SESSION_STORE[token] = session_payload
     await database.save_session(token, user_data)
     
+    # Dynamically determine cookie security matching the active connection protocol
+    is_secure = False
+    if request is not None:
+        proto = request.headers.get("X-Forwarded-Proto", "").lower()
+        is_secure = (proto == "https") or (request.scheme == "https")
+    else:
+        is_secure = config.COOKIE_SECURE and not config.BASE_URL.startswith("http://localhost") and not config.BASE_URL.startswith("http://127.0.0.1")
+        
     response.set_cookie(
         config.COOKIE_NAME,
         token,
         max_age=86400 * 30, # 30 days
         httponly=True,
         samesite="Lax",
-        secure=config.COOKIE_SECURE,
+        secure=is_secure,
         path="/"
     )
     return token
@@ -101,14 +133,22 @@ async def render_template(template_name: str, context: dict = None) -> web.Respo
 
 @web.middleware
 async def security_headers_middleware(request, handler):
-    # CSRF Check for state-changing POST requests (Section 29)
+    # CSRF Check for state-changing POST requests (Section 29 & Audit Point 22)
     if request.method in ["POST", "PUT", "DELETE"]:
         origin = request.headers.get("Origin") or request.headers.get("Referer")
         if origin:
-            expected_host = request.host.lower()
-            # If origin has scheme, check domain
-            origin_clean = origin.split("://")[-1].split("/")[0].lower()
-            if origin_clean != expected_host and not origin_clean.endswith(".onrender.com") and not origin_clean.endswith("yulya.me"):
+            from urllib.parse import urlparse
+            parsed = urlparse(origin)
+            origin_host = (parsed.hostname or "").lower()
+            req_host = (request.host.split(":")[0]).lower()
+            
+            is_valid_origin = (
+                origin_host == req_host or
+                origin_host in ("localhost", "127.0.0.1") or
+                origin_host == "project.yulya.me" or
+                (origin_host.endswith(".onrender.com") and not origin_host.startswith("."))
+            )
+            if not is_valid_origin:
                 return web.json_response({
                     "success": False,
                     "error": "This request could not be verified (CSRF mismatch). Please refresh the page and try again."
@@ -116,18 +156,18 @@ async def security_headers_middleware(request, handler):
                 
     response = await handler(request)
     
-    # CSP & Defense in depth headers (Section 33)
+    # CSP & Defense in depth headers (Section 33 & Audit Point 6)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     
-    # CSP tailored to support WebSockets, Google Fonts, and sandboxed preview iframes
+    # CSP tailored to support WebSockets, Google Fonts, and Phaser/Three/Pixi/Matter/Howler CDNs
     csp_policy = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline'; "
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
         "font-src 'self' https://fonts.gstatic.com; "
         "frame-src 'self'; "
-        "connect-src 'self' wss: ws: https:; "
+        "connect-src 'self' wss: ws: https://fonts.googleapis.com https://fonts.gstatic.com; "
         "img-src 'self' data: https:;"
     )
     response.headers["Content-Security-Policy"] = csp_policy
@@ -167,8 +207,7 @@ async def handle_studio(request: web.Request) -> web.Response:
                 "user": user,
                 "projects": projects,
                 "active_slug": slug,
-                "active_project": proj,
-                "spectator_token": proj.get("spectator_token", "")
+                "active_project": proj
             })
             
     # Never auto-create games! Cleanly redirect to the user's profile where they can browse and click "+ New Project"
@@ -176,36 +215,48 @@ async def handle_studio(request: web.Request) -> web.Response:
 
 async def handle_spectate(request: web.Request) -> web.Response:
     """
-    Spectator HUD for live session streaming.
-    Supports either /spectate/{username}/{slug} or /spectate/{token} (Section 107).
+    Spectator HUD has been removed per creator specifications.
+    Redirects legacy spectator links cleanly to the public playable game.
     """
-    token = request.match_info.get("token")
     username = request.match_info.get("username")
     slug = request.match_info.get("slug")
-    
-    proj = None
+    token = request.match_info.get("token")
+    if username and slug:
+        return web.HTTPFound(f"/{username}/{slug}/")
     if token:
         proj = await database.get_project_by_spectator_token(token)
-    elif username and slug:
-        proj = await database.get_project_by_username_and_slug(username, slug)
-        
-    if not proj:
-        return web.Response(text="Spectator session or project not found.", status=404)
-        
-    return await render_template("spectator.html", {
-        "author": proj.get("username", "creator"),
-        "slug": proj.get("slug", "game"),
-        "title": proj.get("title", proj.get("slug", "Game")),
-        "spectator_token": proj.get("spectator_token", "")
-    })
+        if proj and proj.get("username") and proj.get("slug"):
+            return web.HTTPFound(f"/{proj['username']}/{proj['slug']}/")
+    return web.HTTPFound("/")
 
 # --- Discord OAuth Routes (Section 78) ---
 
 async def handle_login(request: web.Request) -> web.Response:
-    return web.HTTPFound(config.DISCORD_OAUTH_URL)
+    return_to = request.query.get("return_to") or request.query.get("next") or ""
+    state_payload = {"nonce": secrets.token_urlsafe(16)}
+    if return_to and return_to.startswith("/") and not return_to.startswith("//"):
+        state_payload["return_to"] = return_to
+    state_b64 = base64.urlsafe_b64encode(json.dumps(state_payload).encode()).decode()
+    oauth_url = (
+        f"https://discord.com/api/oauth2/authorize?client_id={config.DISCORD_CLIENT_ID}"
+        f"&redirect_uri={config.BASE_URL}/auth/callback&response_type=code&scope=identify"
+        f"&state={state_b64}"
+    )
+    return web.HTTPFound(oauth_url)
 
 async def handle_auth_callback(request: web.Request) -> web.Response:
     code = request.query.get("code")
+    state_str = request.query.get("state")
+    return_to = ""
+    if state_str:
+        try:
+            state_data = json.loads(base64.urlsafe_b64decode(state_str.encode()).decode())
+            candidate = state_data.get("return_to", "")
+            if candidate and candidate.startswith("/") and not candidate.startswith("//"):
+                return_to = candidate
+        except Exception:
+            pass
+            
     if not code:
         return web.HTTPFound("/")
         
@@ -224,7 +275,8 @@ async def handle_auth_callback(request: web.Request) -> web.Response:
                 access_token = token_data.get("access_token")
                 
             if not access_token:
-                return web.HTTPFound("/studio")
+                dest = return_to or "/studio"
+                return web.HTTPFound(dest)
                 
             headers = {"Authorization": f"Bearer {access_token}"}
             async with client.get("https://discord.com/api/users/@me", headers=headers) as user_resp:
@@ -248,19 +300,27 @@ async def handle_auth_callback(request: web.Request) -> web.Response:
             except Exception as e:
                 print(f"[AUTH] Error updating studio profile: {e}")
                 
-            # If user already has an API key configured, route directly to their public profile
             profile = await database.get_user_profile(user_info["id"])
-            if profile and profile.get("studio_api_key"):
-                response = web.HTTPFound(f"/{user_info['username']}")
+            has_api_key = profile and profile.get("studio_api_key")
+            
+            # Destination priority: return_to -> profile (if has key) -> /studio
+            if return_to:
+                target_dest = return_to
+            elif has_api_key:
+                target_dest = f"/{user_info['username']}"
             else:
-                response = web.HTTPFound("/studio")
+                target_dest = "/studio"
                 
-            await set_session_user(response, user_info)
+            response = web.HTTPFound(target_dest)
+            await set_session_user(response, user_info, request)
             return response
-        return web.HTTPFound("/studio")
+            
+        dest = return_to or "/studio"
+        return web.HTTPFound(dest)
     except Exception as e:
         print(f"[AUTH] OAuth error: {e}")
-        return web.HTTPFound("/studio")
+        dest = return_to or "/studio"
+        return web.HTTPFound(dest)
 
 async def handle_logout(request: web.Request) -> web.Response:
     token = request.cookies.get(config.COOKIE_NAME)
@@ -450,17 +510,13 @@ async def api_leave_vc(request: web.Request) -> web.Response:
     return web.json_response({"success": True, "message": "Leave VC signal dispatched to Discord bot."})
 
 async def api_project_files(request: web.Request) -> web.Response:
-    """Returns all project code files for the active editor or spectator (Section 18 & 97)"""
+    """Returns all project code files for the active editor (Section 18)"""
     slug = request.match_info["slug"].lower()
-    token = request.query.get("token")
     user = await get_session_user(request)
     
     proj = None
     if user:
         proj = await database.get_project(user["id"], slug)
-        
-    if not proj and token:
-        proj = await database.get_project_by_spectator_token(token)
         
     if not proj:
         author = request.query.get("author")
@@ -472,7 +528,13 @@ async def api_project_files(request: web.Request) -> web.Response:
     if not proj:
         return web.json_response({"success": False, "error": "Project not found or access denied."}, status=404)
         
+    is_owner = (user is not None and user.get("id") == proj.get("user_id"))
     files = projects_manager.get_project_all_files(proj["user_id"], slug)
+    
+    # Audit Point 10: Protect internal project manifest metadata from non-owners
+    if not is_owner and "project_manifest.json" in files:
+        del files["project_manifest.json"]
+        
     return web.json_response({"success": True, "slug": slug, "files": files})
 
 async def api_community_projects(request: web.Request) -> web.Response:
@@ -487,8 +549,7 @@ async def api_community_projects(request: web.Request) -> web.Response:
             "title": p.get("title") or p.get("slug"),
             "username": p.get("username"),
             "description": p.get("description"),
-            "tags": p.get("tags", []),
-            "spectator_token": p.get("spectator_token", "")
+            "tags": p.get("tags", [])
         })
     return web.json_response(clean)
 
@@ -544,6 +605,13 @@ async def handle_game_asset(request: web.Request) -> web.Response:
     # Block protected files, build logs, hidden files, and disallowed extensions
     if safe_name.startswith(".") or safe_name in projects_manager.PROTECTED_FILES or any(p in projects_manager.PROTECTED_FILES for p in parts):
         return web.Response(text="Access denied: protected file", status=403)
+
+    # Audit Point 10: Protect internal project manifest metadata from non-owners
+    if clean_path == "project_manifest.json":
+        session_user = await get_session_user(request)
+        is_owner = (session_user is not None and (session_user.get("id") == proj.get("user_id") or session_user.get("username", "").lower() == username))
+        if not is_owner:
+            return web.Response(text="Access denied: internal manifest metadata is protected", status=403)
 
     ext = Path(safe_name).suffix.lower()
     if ext in projects_manager.DISALLOWED_EXTENSIONS or ext not in projects_manager.ALLOWED_GAME_EXTENSIONS:
@@ -672,7 +740,7 @@ async def handle_user_slug_studio(request: web.Request) -> web.Response:
     
     session_user = await get_session_user(request)
     if not session_user:
-        return web.HTTPFound(f"/auth/login")
+        return web.HTTPFound(f"/auth/login?return_to={request.path}")
         
     proj = await database.get_project_by_username_and_slug(username, slug)
     if not proj:
@@ -680,32 +748,25 @@ async def handle_user_slug_studio(request: web.Request) -> web.Response:
         
     # Check if user is owner
     if session_user["id"] != proj["user_id"] and session_user.get("username", "").lower() != username:
-        # Not owner, redirect to spectate
-        return web.HTTPFound(f"/spectate/{username}/{slug}")
+        # Not owner, redirect to playable game
+        return web.HTTPFound(f"/{username}/{slug}/")
         
     # Redirect to studio with active slug
     return web.HTTPFound(f"/studio?slug={slug}")
 
 async def api_project_logs(request: web.Request) -> web.Response:
-    """Returns Antigravity CLI activity log entries from build.log (Section 4)"""
+    """Returns Antigravity CLI activity log entries from build.log (Section 4 & Audit Point 9)"""
     slug = request.match_info["slug"].lower()
-    token = request.query.get("token")
     user = await get_session_user(request)
-    
-    proj = None
-    if user:
-        proj = await database.get_project(user["id"], slug)
-    if not proj and token:
-        proj = await database.get_project_by_spectator_token(token)
+    if not user:
+        return web.json_response({"success": False, "error": "Unauthorized: Login required."}, status=401)
+        
+    proj = await database.get_project(user["id"], slug)
     if not proj:
-        author = request.query.get("author")
-        if author:
-            proj = await database.get_project_by_username_and_slug(author, slug)
-        elif database.projects_col is not None:
-            proj = await database.projects_col.find_one({"slug": slug, "is_public": {"$ne": False}})
-            
-    if not proj:
-        return web.json_response({"success": False, "error": "Project not found."}, status=404)
+        proj = await database.get_project_by_username_and_slug(user.get("username", ""), slug)
+        
+    if not proj or proj.get("user_id") != user.get("id"):
+        return web.json_response({"success": False, "error": "Project not found or access denied."}, status=404)
         
     logs = projects_manager.read_build_log(proj["user_id"], slug, max_lines=200)
     return web.json_response({"success": True, "slug": slug, "logs": logs})
@@ -975,7 +1036,7 @@ You are the creative brain, technical director, and pair-programming co-pilot. Y
 
         client = genai.Client(api_key=api_key.strip())
         connected_model = "Gemini 3.8 Live Extended Thinking (High)"
-        live_model = "gemini-3.8-live"
+        live_model = "gemini-3.8-live-extended-thinking"
 
         live_cm = client.aio.live.connect(
             model=live_model,
@@ -1040,7 +1101,10 @@ async def _run_antigravity_builder(slug: str, session_user: dict, api_key: str, 
     """
     Executes Antigravity code generation in a background task so the Gemini Live voice call
     and receive loop stay unblocked. Creator can continue speaking with Gemini Live while coding runs.
+    Enforces centralized build admission controller tracking.
     """
+    build_key = (session_user["id"], slug.lower())
+    ACTIVE_PROJECT_BUILDS.add(build_key)
     try:
         if not ws.closed:
             await ws.send_json({"type": "show_loader", "text": f"Antigravity is coding: {instruction[:60]}..."})
@@ -1098,6 +1162,8 @@ async def _run_antigravity_builder(slug: str, session_user: dict, api_key: str, 
                 await ws.send_json({"type": "hide_loader"})
             except Exception:
                 pass
+    finally:
+        ACTIVE_PROJECT_BUILDS.discard(build_key)
 
 async def _live_receive_loop(ws: web.WebSocketResponse, slug: str, session, api_key: str, session_user: dict):
     """Background listener for streaming audio, thoughts, and tool calls from Gemini Live across all turns."""
@@ -1150,6 +1216,13 @@ async def _live_receive_loop(ws: web.WebSocketResponse, slug: str, session, api_
                         if getattr(server_content, "interrupted", False):
                             if not ws.closed:
                                 await ws.send_json({"type": "ai_interrupted"})
+                        # Handle Extended Thinking interaction lifecycle (IN_PROGRESS vs IDLE)
+                        int_status = getattr(server_content, "interaction_status", None) or getattr(server_content, "interactionStatus", None)
+                        if int_status and not ws.closed:
+                            await ws.send_json({
+                                "type": "interaction_status",
+                                "status": str(int_status)
+                            })
 
                     # Handle tool calls (Architect invoking Antigravity tools)
                     tool_call = response.tool_call
@@ -1438,62 +1511,57 @@ async def stop_gemini_live_session(ws: web.WebSocketResponse):
 # --- WebSocket Hub: /ws/studio (Section 19, 20, 21, 22) ---
 
 async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
+    # Audit Point 21: WebSocket Origin Validation before accepting handshake
+    origin = request.headers.get("Origin")
+    if origin:
+        from urllib.parse import urlparse
+        parsed_orig = urlparse(origin)
+        orig_host = (parsed_orig.hostname or "").lower()
+        req_host = (request.host.split(":")[0]).lower()
+        is_valid_ws_origin = (
+            orig_host == req_host or
+            orig_host in ("localhost", "127.0.0.1") or
+            orig_host == "project.yulya.me" or
+            (orig_host.endswith(".onrender.com") and not orig_host.startswith("."))
+        )
+        if not is_valid_ws_origin:
+            return web.Response(text="Forbidden: invalid WebSocket origin.", status=403)
+
     slug = request.query.get("slug", "").lower()
-    token = request.query.get("token", "")
-    requested_role = request.query.get("role", "spectator")
-    
     if not slug:
         return web.Response(text="Missing slug", status=400)
         
-    # Authenticate role before accepting (Section 19)
+    # Authenticate creator session before accepting (Section 19)
     session_user = await get_session_user(request)
-    role = "spectator"
-    
-    # Check if this connection belongs to the creator
+    is_creator = False
     if session_user:
         user_proj = await database.get_project(session_user["id"], slug)
         if user_proj:
-            role = "creator"
+            is_creator = True
         else:
             user_proj = await database.get_project_by_username_and_slug(session_user.get("username", ""), slug)
             if user_proj:
-                role = "creator"
+                is_creator = True
             elif projects_manager.get_user_project_dir(session_user["id"], slug).exists():
-                role = "creator"
-            
-    # If not creator, strictly authenticate spectator access
-    if role != "creator":
-        spectator_proj = None
-        if token:
-            spectator_proj = await database.get_project_by_spectator_token(token)
-            
-        if not spectator_proj and database.projects_col is not None:
-            # Check if project exists by slug and is public
-            spectator_proj = await database.projects_col.find_one({
-                "slug": slug,
-                "is_public": {"$ne": False}
-            })
-            
-        if not spectator_proj:
-            # Reject invalid sessions (Section 19)
-            return web.Response(text="Unauthorized: Project or spectator session not found.", status=401)
+                is_creator = True
+                
+    if not is_creator:
+        # Audit Point 9: Spectator role removed completely. Only creator can connect.
+        return web.Response(text="Unauthorized: Studio WebSocket is strictly for the project creator.", status=401)
 
-    ws = web.WebSocketResponse()
+    # Audit Point 15: Enforce max WebSocket message size (2 MB)
+    ws = web.WebSocketResponse(max_msg_size=2 * 1024 * 1024)
     await ws.prepare(request)
     
     if slug not in ACTIVE_STUDIO_WS:
         ACTIVE_STUDIO_WS[slug] = {
             "creator": set(),
-            "spectators": set(),
-            "last_seen": {}
+            "last_seen": {},
+            "last_frame": 0
         }
         
     slot = ACTIVE_STUDIO_WS[slug]
-    if role == "creator":
-        slot["creator"].add(ws)
-    else:
-        slot["spectators"].add(ws)
-        
+    slot["creator"].add(ws)
     slot["last_seen"][ws] = time.time()
     
     # Broadcast connection status
@@ -1510,7 +1578,6 @@ async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
                     msg_type = data.get("type")
                     
                     if msg_type == "heartbeat":
-                        # Client ping to keep alive
                         continue
 
                     elif msg_type == "connect_live":
@@ -1520,24 +1587,17 @@ async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
                                     "type": "live_error",
                                     "message": "Authentication required. Please sign in to connect Gemini Live."
                                 })
-                        elif role != "creator":
-                            if not ws.closed:
-                                await ws.send_json({
-                                    "type": "live_error",
-                                    "message": "Only the creator of this game can connect to Gemini Live."
-                                })
                         else:
                             await start_gemini_live_session(ws, slug, session_user)
 
                     elif msg_type == "disconnect_live":
-                        if role == "creator":
-                            await stop_gemini_live_session(ws)
+                        await stop_gemini_live_session(ws)
 
                     elif msg_type == "audio_chunk":
                         # Forward audio chunk from creator's microphone to Gemini Live session
-                        if role == "creator" and ws in ACTIVE_LIVE_SESSIONS:
+                        if ws in ACTIVE_LIVE_SESSIONS:
                             pcm_b64 = data.get("pcm")
-                            if pcm_b64:
+                            if pcm_b64 and len(pcm_b64) <= 256_000:
                                 try:
                                     pcm_bytes = base64.b64decode(pcm_b64)
                                     live_sess = ACTIVE_LIVE_SESSIONS[ws]["session"]
@@ -1549,7 +1609,7 @@ async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
 
                     elif msg_type == "audio_end":
                         # Creator finished speaking turn (signals turn complete to Gemini Live)
-                        if role == "creator" and ws in ACTIVE_LIVE_SESSIONS:
+                        if ws in ACTIVE_LIVE_SESSIONS:
                             live_sess = ACTIVE_LIVE_SESSIONS[ws]["session"]
                             transcript = data.get("transcript", "").strip()
                             try:
@@ -1563,7 +1623,7 @@ async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
 
                     elif msg_type == "live_text":
                         # Creator sends text directly to Gemini 3.8 Live session
-                        if role == "creator" and ws in ACTIVE_LIVE_SESSIONS:
+                        if ws in ACTIVE_LIVE_SESSIONS:
                             text_input = data.get("text", "").strip()
                             if text_input:
                                 live_sess = ACTIVE_LIVE_SESSIONS[ws]["session"]
@@ -1574,17 +1634,30 @@ async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
                                 await broadcast_project_log(slug, f"[VOICE] User sent chat message: \"{text_input[:60]}...\"", "voice")
                         
                     elif msg_type == "command":
-                        # ONLY creator is authorized to execute commands (Section 21)
-                        if role != "creator":
-                            await ws.send_json({
-                                "type": "log",
-                                "level": "error",
-                                "message": "Spectators are not authorized to send creator commands."
-                            })
-                            continue
-                            
                         prompt = data.get("prompt", "").strip()
                         if prompt and session_user:
+                            # Audit Point 13: Centralized build rate limiting
+                            allowed, wait_sec = check_rate_limit("build", str(session_user["id"]), *config.RATE_LIMIT_MODIFY)
+                            if not allowed:
+                                if not ws.closed:
+                                    await ws.send_json({
+                                        "type": "log",
+                                        "level": "warning",
+                                        "message": f"You're sending build requests too quickly. Please wait {wait_sec}s."
+                                    })
+                                continue
+
+                            # Audit Point 14: Centralized build admission check (prevent thrashing)
+                            build_key = (session_user["id"], slug.lower())
+                            if build_key in ACTIVE_PROJECT_BUILDS:
+                                if not ws.closed:
+                                    await ws.send_json({
+                                        "type": "log",
+                                        "level": "warning",
+                                        "message": "A build is already in progress for this project. Please wait for it to complete."
+                                    })
+                                continue
+
                             profile = await database.get_user_profile(session_user["id"])
                             api_key = profile.get("studio_api_key") if profile else None
                             if api_key:
@@ -1602,12 +1675,12 @@ async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
                                 asyncio.create_task(_run_antigravity_builder(slug, session_user, api_key, prompt, ws, live_sess))
                                     
                     elif msg_type == "video_frame":
-                        # Only creator can stream screen frames (Section 21, 81)
-                        if role == "creator":
-                            frame_data = data.get("data")
-                            if frame_data:
-                                await broadcast_screen_frame(slug, frame_data)
-                                # Forward frame to Gemini Live vision
+                        # Audit Point 15: Server-side frame size and rate controls
+                        frame_data = data.get("data")
+                        if frame_data and len(frame_data) <= 1_500_000:
+                            last_frame = slot.get("last_frame", 0)
+                            if now - last_frame >= 0.25: # Max 4 FPS
+                                slot["last_frame"] = now
                                 if ws in ACTIVE_LIVE_SESSIONS:
                                     try:
                                         jpeg_bytes = base64.b64decode(frame_data)
@@ -1623,7 +1696,7 @@ async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
                     
             elif msg.type == web.WSMsgType.BINARY:
                 # Binary audio data from PTT or streaming mic
-                if role == "creator" and ws in ACTIVE_LIVE_SESSIONS and len(msg.data) > 0:
+                if ws in ACTIVE_LIVE_SESSIONS and len(msg.data) > 0 and len(msg.data) <= 64_000:
                     try:
                         live_sess = ACTIVE_LIVE_SESSIONS[ws]["session"]
                         await live_sess.send(input=types.LiveClientRealtimeInput(
@@ -1638,9 +1711,8 @@ async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
         if slug in ACTIVE_STUDIO_WS:
             slot = ACTIVE_STUDIO_WS[slug]
             slot["creator"].discard(ws)
-            slot["spectators"].discard(ws)
             slot["last_seen"].pop(ws, None)
-            if not slot["creator"] and not slot["spectators"]:
+            if not slot["creator"]:
                 del ACTIVE_STUDIO_WS[slug]
             else:
                 await broadcast_status(slug)
@@ -1651,15 +1723,14 @@ async def broadcast_status(slug: str):
     if slug not in ACTIVE_STUDIO_WS:
         return
     slot = ACTIVE_STUDIO_WS[slug]
-    total_users = len(slot["creator"]) + len(slot["spectators"])
-    creator_online = len(slot["creator"]) > 0
+    total_users = len(slot["creator"])
+    creator_online = total_users > 0
     msg = {
         "type": "status",
         "connected_users": total_users,
         "creator_online": creator_online
     }
-    all_clients = slot["creator"] | slot["spectators"]
-    for c in list(all_clients):
+    for c in list(slot["creator"]):
         if not c.closed:
             try:
                 await c.send_json(msg)
@@ -1669,8 +1740,7 @@ async def broadcast_status(slug: str):
 async def broadcast_project_update(slug: str, message: dict):
     if slug in ACTIVE_STUDIO_WS:
         slot = ACTIVE_STUDIO_WS[slug]
-        all_clients = slot["creator"] | slot["spectators"]
-        for client in list(all_clients):
+        for client in list(slot["creator"]):
             if not client.closed:
                 try:
                     await client.send_json(message)
@@ -1686,26 +1756,10 @@ async def broadcast_project_log(slug: str, message_text: str, level: str = "info
             "level": level,
             "timestamp": int(time.time())
         }
-        all_clients = slot["creator"] | slot["spectators"]
-        for client in list(all_clients):
+        for client in list(slot["creator"]):
             if not client.closed:
                 try:
                     await client.send_json(msg)
-                except Exception:
-                    pass
-
-async def broadcast_screen_frame(slug: str, frame_data: str):
-    if slug in ACTIVE_STUDIO_WS:
-        slot = ACTIVE_STUDIO_WS[slug]
-        msg = {
-            "type": "screen_frame",
-            "data": frame_data
-        }
-        # Send screen frames only to spectators
-        for spectator in list(slot["spectators"]):
-            if not spectator.closed:
-                try:
-                    await spectator.send_json(msg)
                 except Exception:
                     pass
 

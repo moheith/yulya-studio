@@ -41,14 +41,7 @@ async def run_tests():
             "user": {"username": "carol", "id": 789},
             "projects": [{"slug": "neon-dodge", "title": "Neon Dodge"}],
             "active_slug": "neon-dodge",
-            "active_project": {"slug": "neon-dodge", "title": "Neon Dodge"},
-            "spectator_token": "test-token"
-        }),
-        ("spectator.html", {
-            "author": "carol",
-            "slug": "neon-dodge",
-            "title": "Neon Dodge",
-            "spectator_token": "test-token"
+            "active_project": {"slug": "neon-dodge", "title": "Neon Dodge"}
         }),
         ("profile.html", {
             "user": {"username": "carol", "id": 789},
@@ -82,7 +75,7 @@ async def run_tests():
             assert_true(resp.status == 200 and len(resp.text) > 200, f"Rendered {tmpl} with ctx={list(ctx.keys())}")
             
             # Verify Iframe Sandbox in templates (allow-scripts ONLY, strictly no allow-same-origin)
-            if tmpl in ["studio.html", "spectator.html", "profile.html"]:
+            if tmpl in ["studio.html", "profile.html"]:
                 assert_true('sandbox="allow-scripts"' in resp.text, f"Iframe has sandbox='allow-scripts' in {tmpl}")
             elif tmpl == "index.html":
                 assert_true("sandbox = 'allow-scripts'" in resp.text or 'sandbox="allow-scripts"' in resp.text, "Iframe sandbox configured in index.html")
@@ -97,9 +90,6 @@ async def run_tests():
             if tmpl == "studio.html":
                 assert_true('id="commandPaletteModal"' in resp.text, "Command Palette modal exists in studio.html")
                 assert_true('paletteSearchInput' in resp.text, "Command Palette input exists in studio.html")
-            elif tmpl == "spectator.html":
-                assert_true('id="codeEditorWrap"' in resp.text, "Code viewer wrapper exists in spectator.html")
-                assert_true('tabApp' in resp.text and 'tabIndex' in resp.text, "File tabs exist in spectator.html")
             elif tmpl == "index.html":
                 assert_true('author.innerHTML' not in resp.text, "XSS-safe author DOM construction in index.html")
             elif tmpl == "profile.html":
@@ -255,15 +245,15 @@ async def run_tests():
         except server.web.HTTPFound as redirect:
             assert_true(redirect.location == "/moheith/neon-dodge/", f"Redirects to trailing slash: {redirect.location}")
 
-        # Test WebSocket rejection for unauthorized spectator with invalid slug/token
+        # Test WebSocket rejection for unauthorized connection with invalid slug/token
         req_bad_ws = make_mocked_request(
             "GET",
-            "/ws/studio?slug=nonexistent-game-xyz-999&token=bogus_token&role=spectator",
+            "/ws/studio?slug=nonexistent-game-xyz-999&token=bogus_token",
             headers={"Upgrade": "websocket", "Connection": "Upgrade"},
             app=app
         )
         ws_res = await server.handle_ws_studio(req_bad_ws)
-        assert_true(isinstance(ws_res, server.web.Response) and ws_res.status == 401, "Rejected invalid spectator WebSocket connection with 401")
+        assert_true(isinstance(ws_res, server.web.Response) and ws_res.status == 401, "Rejected unauthorized WebSocket connection with 401")
 
         # Test user slug studio redirect
         req_studio = make_mocked_request("GET", "/moheith/neon-dodge/studio", match_info={"username": "moheith", "slug": "neon-dodge"}, app=app)

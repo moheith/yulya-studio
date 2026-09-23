@@ -303,15 +303,19 @@ def create_starter_game(user_id: int, username: str, slug: str, title: str):
     """
     Generates a clean, playable Neon Dodge starter game.
     Follows Yulya Studio design system tokens and HTML5 Canvas best practices.
+    HTML-escapes title and username to prevent XSS / markup injection.
     """
+    import html as html_lib
     pdir = get_user_project_dir(user_id, slug)
+    safe_title = html_lib.escape(title[:80]) if title else "Neon Dodge"
+    safe_username = html_lib.escape(username[:40]) if username else "creator"
     
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{title}</title>
+  <title>{safe_title}</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -319,7 +323,7 @@ def create_starter_game(user_id: int, username: str, slug: str, title: str):
     <div class="hud">
       <div class="brand">
         <span class="dot"></span>
-        <span class="game-title">{title}</span>
+        <span class="game-title">{safe_title}</span>
       </div>
       <div class="stats">
         <div class="stat-item">SCORE <span id="scoreVal">0</span></div>
@@ -335,7 +339,7 @@ def create_starter_game(user_id: int, username: str, slug: str, title: str):
       </div>
     </div>
     <div class="footer-note">
-      Created by @{username} &bull; Powered by Yulya Studio
+      Created by @{safe_username} &bull; Powered by Yulya Studio
     </div>
   </div>
   <script src="app.js"></script>
@@ -719,9 +723,9 @@ startBtn.addEventListener('click', startGame);
 """
 
     pdir.mkdir(parents=True, exist_ok=True)
-    (pdir / "index.html").write_text(html, encoding="utf-8")
-    (pdir / "style.css").write_text(css, encoding="utf-8")
-    (pdir / "app.js").write_text(js, encoding="utf-8")
+    write_project_file(user_id, slug, "index.html", html)
+    write_project_file(user_id, slug, "style.css", css)
+    write_project_file(user_id, slug, "app.js", js)
     
     # Initialize starter project manifest for architectural memory
     initial_manifest = {
