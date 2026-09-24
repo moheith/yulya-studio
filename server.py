@@ -11,7 +11,34 @@ from datetime import datetime, timezone
 from aiohttp import web, ClientSession
 import jinja2
 from google import genai
-from google.genai import types
+from google.genai import types, models
+
+# Compatibility patches for google-genai 0.5.0:
+# 1. Preserve thinkingLevel in _ThinkingConfig_to_mldev for Gemini Live Extended Thinking models
+_orig_thinking_to_mldev = models._ThinkingConfig_to_mldev
+def _patched_thinking_to_mldev(api_client, from_object, parent_object=None):
+    res = _orig_thinking_to_mldev(api_client, from_object, parent_object)
+    lvl = None
+    if isinstance(from_object, dict):
+        lvl = from_object.get("thinking_level") or from_object.get("thinkingLevel")
+    elif hasattr(from_object, "thinking_level"):
+        lvl = getattr(from_object, "thinking_level")
+    elif hasattr(from_object, "thinkingLevel"):
+        lvl = getattr(from_object, "thinkingLevel")
+    if lvl is not None:
+        res["thinkingLevel"] = str(lvl).upper()
+    return res
+models._ThinkingConfig_to_mldev = _patched_thinking_to_mldev
+
+# 2. Ensure function declaration parameters (Pydantic Schema) are JSON-serializable dicts for Live WebSocket setup
+_orig_fd_to_mldev = models._FunctionDeclaration_to_mldev
+def _patched_fd_to_mldev(api_client, from_object, parent_object=None):
+    res = _orig_fd_to_mldev(api_client, from_object, parent_object)
+    params = res.get("parameters")
+    if hasattr(params, "model_dump"):
+        res["parameters"] = params.model_dump(exclude_none=True, by_alias=True)
+    return res
+models._FunctionDeclaration_to_mldev = _patched_fd_to_mldev
 
 import config
 import database
@@ -1035,23 +1062,45 @@ You are the creative brain, technical director, and pair-programming co-pilot. Y
         )
 
         client = genai.Client(api_key=api_key.strip())
-        connected_model = "Gemini 3.8 Live Extended Thinking (High)"
-        live_model = "gemini-3.8-live-extended-thinking"
 
-        live_cm = client.aio.live.connect(
-            model=live_model,
-            config={
-                "response_modalities": ["AUDIO"],
-                "system_instruction": types.Content(parts=[types.Part.from_text(text=live_sys_prompt)]),
-                "tools": [architect_tools],
-                "generation_config": {
-                    "thinking_config": {
-                        "include_thoughts": True
-                    }
+        # Connection cascade for Gemini Live models:
+        # 1. gemini-3.8-live-extended-thinking (requires thinking_level="HIGH")
+        # 2. gemini-3.8-live (does not support thinking_level)
+        # 3. gemini-3.1-flash-live-preview (preview fallback)
+        live_candidates = [
+            ("gemini-3.8-live-extended-thinking", "Gemini 3.8 Live Extended Thinking (High)", {"include_thoughts": True, "thinking_level": "HIGH"}),
+            ("gemini-3.8-live", "Gemini 3.8 Live", None),
+            ("gemini-3.1-flash-live-preview", "Gemini 3.1 Live Preview", None)
+        ]
+
+        session = None
+        live_cm = None
+        connected_model = None
+        last_connect_err = None
+
+        for model_name, display_name, thinking_cfg in live_candidates:
+            try:
+                cfg = {
+                    "response_modalities": ["AUDIO"],
+                    "system_instruction": types.Content(parts=[types.Part.from_text(text=live_sys_prompt)]),
+                    "tools": [architect_tools]
                 }
-            }
-        )
-        session = await live_cm.__aenter__()
+                if thinking_cfg:
+                    cfg["generation_config"] = {
+                        "thinking_config": thinking_cfg
+                    }
+                cm = client.aio.live.connect(model=model_name, config=cfg)
+                session = await cm.__aenter__()
+                live_cm = cm
+                connected_model = display_name
+                print(f"[LIVE] Connected to {display_name} ({model_name})")
+                break
+            except Exception as conn_err:
+                print(f"[LIVE] Connection attempt to {model_name} failed: {conn_err}")
+                last_connect_err = conn_err
+
+        if not session or not live_cm:
+            raise last_connect_err or Exception("All Gemini Live connection candidates failed.")
 
         # Start receive loop task
         receive_task = asyncio.create_task(_live_receive_loop(ws, slug, session, api_key, session_user))
