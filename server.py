@@ -12,9 +12,45 @@ from aiohttp import web, ClientSession
 import jinja2
 from google import genai
 from google.genai import types, models
+import google.genai.live as live_mod
 
-# Compatibility patches for google-genai 0.5.0:
-# 1. Preserve thinkingLevel in _ThinkingConfig_to_mldev for Gemini Live Extended Thinking models
+# Compatibility patches for google-genai SDK:
+# 1. Directly intercept _LiveSetup_to_mldev on AsyncLive and Live to guarantee thinkingLevel and tool schemas
+def _patch_live_setup_fn(orig_fn):
+    def _patched_live_setup(self, model: str, config=None):
+        res = orig_fn(self, model=model, config=config)
+        setup = res.get("setup", {})
+        gen_config = setup.setdefault("generationConfig", {})
+
+        # Extended thinking models strictly require thinkingLevel ("HIGH", "MEDIUM", "LOW")
+        if "extended-thinking" in model.lower():
+            th_cfg = gen_config.setdefault("thinkingConfig", {})
+            th_cfg["thinkingLevel"] = "HIGH"
+            th_cfg["includeThoughts"] = True
+        elif "thinkingConfig" in gen_config and "extended-thinking" not in model.lower():
+            # Base models (e.g. gemini-3.8-live) reject thinkingLevel
+            if isinstance(gen_config.get("thinkingConfig"), dict):
+                gen_config["thinkingConfig"].pop("thinkingLevel", None)
+                gen_config["thinkingConfig"].pop("thinking_level", None)
+                if not gen_config["thinkingConfig"]:
+                    gen_config.pop("thinkingConfig", None)
+
+        # Convert any Pydantic Schema instances inside tool function declarations into native dicts
+        for tool in setup.get("tools", []):
+            if isinstance(tool, dict) and "functionDeclarations" in tool:
+                for fd in tool["functionDeclarations"]:
+                    params = fd.get("parameters")
+                    if hasattr(params, "model_dump"):
+                        fd["parameters"] = params.model_dump(exclude_none=True, by_alias=True)
+        return res
+    return _patched_live_setup
+
+if hasattr(live_mod, "AsyncLive") and hasattr(live_mod.AsyncLive, "_LiveSetup_to_mldev"):
+    live_mod.AsyncLive._LiveSetup_to_mldev = _patch_live_setup_fn(live_mod.AsyncLive._LiveSetup_to_mldev)
+if hasattr(live_mod, "Live") and hasattr(live_mod.Live, "_LiveSetup_to_mldev"):
+    live_mod.Live._LiveSetup_to_mldev = _patch_live_setup_fn(live_mod.Live._LiveSetup_to_mldev)
+
+# 2. Preserve thinkingLevel in _ThinkingConfig_to_mldev
 _orig_thinking_to_mldev = models._ThinkingConfig_to_mldev
 def _patched_thinking_to_mldev(api_client, from_object, parent_object=None):
     res = _orig_thinking_to_mldev(api_client, from_object, parent_object)
@@ -30,7 +66,7 @@ def _patched_thinking_to_mldev(api_client, from_object, parent_object=None):
     return res
 models._ThinkingConfig_to_mldev = _patched_thinking_to_mldev
 
-# 2. Ensure function declaration parameters (Pydantic Schema) are JSON-serializable dicts for Live WebSocket setup
+# 3. Ensure function declaration parameters (Pydantic Schema) are JSON-serializable dicts
 _orig_fd_to_mldev = models._FunctionDeclaration_to_mldev
 def _patched_fd_to_mldev(api_client, from_object, parent_object=None):
     res = _orig_fd_to_mldev(api_client, from_object, parent_object)
@@ -580,6 +616,19 @@ async def api_community_projects(request: web.Request) -> web.Response:
         })
     return web.json_response(clean)
 
+async def api_health(request: web.Request) -> web.Response:
+    """Diagnostic health check & deployment verification for Yulya Studio"""
+    return web.json_response({
+        "status": "healthy",
+        "service": "yulya-studio",
+        "version": "2026-09-24-live-v3",
+        "live_models": [
+            "gemini-3.8-live-extended-thinking",
+            "gemini-3.8-live",
+            "gemini-3.1-flash-live-preview"
+        ]
+    })
+
 async def api_download_zip(request: web.Request) -> web.Response:
     """ZIP export of full project code (Section 75)"""
     username = request.match_info["username"].lower()
@@ -1076,7 +1125,7 @@ You are the creative brain, technical director, and pair-programming co-pilot. Y
         session = None
         live_cm = None
         connected_model = None
-        last_connect_err = None
+        candidate_errors = []
 
         for model_name, display_name, thinking_cfg in live_candidates:
             try:
@@ -1097,10 +1146,11 @@ You are the creative brain, technical director, and pair-programming co-pilot. Y
                 break
             except Exception as conn_err:
                 print(f"[LIVE] Connection attempt to {model_name} failed: {conn_err}")
-                last_connect_err = conn_err
+                candidate_errors.append(f"{model_name}: {conn_err}")
 
         if not session or not live_cm:
-            raise last_connect_err or Exception("All Gemini Live connection candidates failed.")
+            err_summary = "; ".join(candidate_errors)
+            raise Exception(f"Live connect failed across candidates ({err_summary})")
 
         # Start receive loop task
         receive_task = asyncio.create_task(_live_receive_loop(ws, slug, session, api_key, session_user))
@@ -1894,6 +1944,7 @@ async def init_app():
     app.router.add_post("/api/project-logs/{slug}", api_save_project_log)
     app.router.add_get("/api/community-projects", api_community_projects)
     app.router.add_get("/api/download-zip/{username}/{slug}", api_download_zip)
+    app.router.add_get("/api/health", api_health)
     
     # WebSocket
     app.router.add_get("/ws/studio", handle_ws_studio)

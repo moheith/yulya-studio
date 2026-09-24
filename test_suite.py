@@ -216,6 +216,7 @@ async def run_tests():
             "/api/delete-project",
             "/api/leave-vc",
             "/api/community-projects",
+            "/api/health",
             "/api/project-files/{slug}",
             "/api/project-logs/{slug}",
             "/api/download-zip/{username}/{slug}",
