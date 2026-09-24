@@ -81,6 +81,60 @@ if hasattr(models, "_FunctionDeclaration_to_mldev"):
         return res
     models._FunctionDeclaration_to_mldev = _patched_fd_to_mldev
 
+# 4. Normalize client messages for Google MLDev Live WebSocket (convert tool_response -> toolResponse, realtime_input -> realtimeInput, etc.)
+def _mldev_normalize_client_message(msg):
+    if not isinstance(msg, dict):
+        return msg
+    normalized = {}
+    for k, v in msg.items():
+        if k == "tool_response":
+            frs = v.get("function_responses") or v.get("functionResponses") or []
+            normalized["toolResponse"] = {
+                "functionResponses": frs
+            }
+        elif k == "realtime_input":
+            mcs = []
+            for mc in (v.get("media_chunks") or v.get("mediaChunks") or []):
+                chunk = {}
+                for mck, mcv in mc.items():
+                    if mck == "mime_type":
+                        chunk["mimeType"] = mcv
+                    else:
+                        chunk[mck] = mcv
+                mcs.append(chunk)
+            normalized["realtimeInput"] = {
+                "mediaChunks": mcs
+            }
+        elif k == "client_content":
+            cc = {}
+            for cck, ccv in v.items():
+                if cck == "turn_complete":
+                    cc["turnComplete"] = ccv
+                else:
+                    cc[cck] = ccv
+            normalized["clientContent"] = cc
+        else:
+            normalized[k] = v
+    return normalized
+
+if hasattr(live_mod, "AsyncSession") and hasattr(live_mod.AsyncSession, "send"):
+    _orig_async_session_send = live_mod.AsyncSession.send
+    async def _patched_async_session_send(self, *, input, end_of_turn=False):
+        client_message = self._parse_client_message(input, end_of_turn)
+        if not getattr(self._api_client, "vertexai", False):
+            client_message = _mldev_normalize_client_message(client_message)
+        await self._ws.send(json.dumps(client_message))
+    live_mod.AsyncSession.send = _patched_async_session_send
+
+if hasattr(live_mod, "Session") and hasattr(live_mod.Session, "send"):
+    _orig_sync_session_send = live_mod.Session.send
+    def _patched_sync_session_send(self, *, input, end_of_turn=False):
+        client_message = self._parse_client_message(input, end_of_turn)
+        if not getattr(self._api_client, "vertexai", False):
+            client_message = _mldev_normalize_client_message(client_message)
+        self._ws.send(json.dumps(client_message))
+    live_mod.Session.send = _patched_sync_session_send
+
 import config
 import database
 import projects_manager
@@ -972,8 +1026,10 @@ You are the creative brain, technical director, and pair-programming co-pilot. Y
      * Suggest particle effects, sound cues, or difficulty tweaks
      * If you spot a bug or glitch, say so and offer to draft a fix immediately!
 
-7. **Synchronized Transcript Logging:**
-   - Every time you speak in voice, call `post_chat_message(message=...)` with your spoken message so it appears cleanly in the creator's chat transcript.
+7. **Conversational Speech & Automatic Transcript:**
+   - Speak naturally, warmly, and enthusiastically in voice.
+   - You do NOT need to call any tool to write chat messages; your spoken words are automatically transcribed in real time on the creator's screen!
+   - Reserve tool calls exclusively for engineering actions: when the creator wants to build or modify features, call `draft_prompt_to_input` or `send_prompt_to_antigravity`.
 
 **Current Project Manifest Memory:**
 {manifest_summary}
@@ -984,17 +1040,6 @@ You are the creative brain, technical director, and pair-programming co-pilot. Y
 
         architect_tools = types.Tool(
             function_declarations=[
-                types.FunctionDeclaration(
-                    name="post_chat_message",
-                    description="Posts a markdown text chat message and transcript to the creator's on-screen Chat tab so they can read your suggestions, options, questions, or architectural plans while listening to your voice.",
-                    parameters=types.Schema(
-                        type="OBJECT",
-                        properties={
-                            "message": types.Schema(type="STRING", description="The markdown text message to show on the creator's Chat screen.")
-                        },
-                        required=["message"]
-                    )
-                ),
                 types.FunctionDeclaration(
                     name="draft_prompt_to_input",
                     description="Populates the drafted Antigravity engineering prompt into the creator's on-screen command input text box for review and editing before sending.",
@@ -1183,8 +1228,7 @@ You are the creative brain, technical director, and pair-programming co-pilot. Y
                     f"The creator @{creator_name} has just joined the call for the HTML5 Canvas project '{slug}'. "
                     "Speak immediately right now in voice: Greet @{creator_name} warmly and with high energy! "
                     "Introduce yourself as their AI Game Architect & pair-programming co-pilot in Yulya Studio. "
-                    "Ask them what game or project idea they want to create today, and begin the design interview to help them plan and architect it! "
-                    "Always execute post_chat_message tool so your greeting and questions appear in their on-screen Chat tab as you speak."
+                    "Ask them what game or project idea they want to create today, and begin the design interview to help them plan and architect it!"
                 ),
                 end_of_turn=True
             )
@@ -1732,7 +1776,7 @@ async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
                             if text_input:
                                 live_sess = ACTIVE_LIVE_SESSIONS[ws]["session"]
                                 await live_sess.send(
-                                    input=f"The creator typed in chat: \"{text_input}\". Reply both in voice and execute post_chat_message tool so your response appears in their chat window!",
+                                    input=f"The creator typed in chat: \"{text_input}\". Reply naturally in voice to help them design and build their game!",
                                     end_of_turn=True
                                 )
                                 await broadcast_project_log(slug, f"[VOICE] User sent chat message: \"{text_input[:60]}...\"", "voice")
