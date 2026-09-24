@@ -16,65 +16,70 @@ import google.genai.live as live_mod
 
 # Compatibility patches for google-genai SDK:
 # 1. Directly intercept _LiveSetup_to_mldev on AsyncLive and Live to guarantee thinkingLevel and tool schemas
-def _patch_live_setup_fn(orig_fn):
-    def _patched_live_setup(self, model: str, config=None):
-        res = orig_fn(self, model=model, config=config)
-        setup = res.get("setup", {})
-        gen_config = setup.setdefault("generationConfig", {})
+try:
+    def _patch_live_setup_fn(orig_fn):
+        def _patched_live_setup(self, model: str, config=None):
+            res = orig_fn(self, model=model, config=config)
+            setup = res.get("setup", {}) if isinstance(res, dict) else {}
+            gen_config = setup.setdefault("generationConfig", {})
 
-        # Extended thinking models strictly require thinkingLevel ("HIGH", "MEDIUM", "LOW")
-        if "extended-thinking" in model.lower():
-            th_cfg = gen_config.setdefault("thinkingConfig", {})
-            th_cfg["thinkingLevel"] = "HIGH"
-            th_cfg["includeThoughts"] = True
-        elif "thinkingConfig" in gen_config and "extended-thinking" not in model.lower():
-            # Base models (e.g. gemini-3.8-live) reject thinkingLevel
-            if isinstance(gen_config.get("thinkingConfig"), dict):
-                gen_config["thinkingConfig"].pop("thinkingLevel", None)
-                gen_config["thinkingConfig"].pop("thinking_level", None)
-                if not gen_config["thinkingConfig"]:
-                    gen_config.pop("thinkingConfig", None)
+            # Extended thinking models strictly require thinkingLevel ("HIGH", "MEDIUM", "LOW")
+            if "extended-thinking" in model.lower():
+                th_cfg = gen_config.setdefault("thinkingConfig", {})
+                th_cfg["thinkingLevel"] = "HIGH"
+                th_cfg["includeThoughts"] = True
+            elif "thinkingConfig" in gen_config and "extended-thinking" not in model.lower():
+                # Base models (e.g. gemini-3.8-live) reject thinkingLevel
+                if isinstance(gen_config.get("thinkingConfig"), dict):
+                    gen_config["thinkingConfig"].pop("thinkingLevel", None)
+                    gen_config["thinkingConfig"].pop("thinking_level", None)
+                    if not gen_config["thinkingConfig"]:
+                        gen_config.pop("thinkingConfig", None)
 
-        # Convert any Pydantic Schema instances inside tool function declarations into native dicts
-        for tool in setup.get("tools", []):
-            if isinstance(tool, dict) and "functionDeclarations" in tool:
-                for fd in tool["functionDeclarations"]:
-                    params = fd.get("parameters")
-                    if hasattr(params, "model_dump"):
-                        fd["parameters"] = params.model_dump(exclude_none=True, by_alias=True)
+            # Convert any Pydantic Schema instances inside tool function declarations into native dicts
+            for tool in setup.get("tools", []):
+                if isinstance(tool, dict) and "functionDeclarations" in tool:
+                    for fd in tool["functionDeclarations"]:
+                        params = fd.get("parameters")
+                        if hasattr(params, "model_dump"):
+                            fd["parameters"] = params.model_dump(exclude_none=True, by_alias=True)
+            return res
+        return _patched_live_setup
+
+    if hasattr(live_mod, "AsyncLive") and hasattr(live_mod.AsyncLive, "_LiveSetup_to_mldev"):
+        live_mod.AsyncLive._LiveSetup_to_mldev = _patch_live_setup_fn(live_mod.AsyncLive._LiveSetup_to_mldev)
+    if hasattr(live_mod, "Live") and hasattr(live_mod.Live, "_LiveSetup_to_mldev"):
+        live_mod.Live._LiveSetup_to_mldev = _patch_live_setup_fn(live_mod.Live._LiveSetup_to_mldev)
+except Exception as patch_err:
+    print(f"[SDK PATCH WARNING] Could not patch LiveSetup: {patch_err}")
+
+# 2. Guarded legacy patch for _ThinkingConfig_to_mldev if present in older SDK versions
+if hasattr(models, "_ThinkingConfig_to_mldev"):
+    _orig_thinking_to_mldev = getattr(models, "_ThinkingConfig_to_mldev")
+    def _patched_thinking_to_mldev(api_client, from_object, parent_object=None):
+        res = _orig_thinking_to_mldev(api_client, from_object, parent_object)
+        lvl = None
+        if isinstance(from_object, dict):
+            lvl = from_object.get("thinking_level") or from_object.get("thinkingLevel")
+        elif hasattr(from_object, "thinking_level"):
+            lvl = getattr(from_object, "thinking_level")
+        elif hasattr(from_object, "thinkingLevel"):
+            lvl = getattr(from_object, "thinkingLevel")
+        if lvl is not None:
+            res["thinkingLevel"] = str(lvl).upper()
         return res
-    return _patched_live_setup
+    models._ThinkingConfig_to_mldev = _patched_thinking_to_mldev
 
-if hasattr(live_mod, "AsyncLive") and hasattr(live_mod.AsyncLive, "_LiveSetup_to_mldev"):
-    live_mod.AsyncLive._LiveSetup_to_mldev = _patch_live_setup_fn(live_mod.AsyncLive._LiveSetup_to_mldev)
-if hasattr(live_mod, "Live") and hasattr(live_mod.Live, "_LiveSetup_to_mldev"):
-    live_mod.Live._LiveSetup_to_mldev = _patch_live_setup_fn(live_mod.Live._LiveSetup_to_mldev)
-
-# 2. Preserve thinkingLevel in _ThinkingConfig_to_mldev
-_orig_thinking_to_mldev = models._ThinkingConfig_to_mldev
-def _patched_thinking_to_mldev(api_client, from_object, parent_object=None):
-    res = _orig_thinking_to_mldev(api_client, from_object, parent_object)
-    lvl = None
-    if isinstance(from_object, dict):
-        lvl = from_object.get("thinking_level") or from_object.get("thinkingLevel")
-    elif hasattr(from_object, "thinking_level"):
-        lvl = getattr(from_object, "thinking_level")
-    elif hasattr(from_object, "thinkingLevel"):
-        lvl = getattr(from_object, "thinkingLevel")
-    if lvl is not None:
-        res["thinkingLevel"] = str(lvl).upper()
-    return res
-models._ThinkingConfig_to_mldev = _patched_thinking_to_mldev
-
-# 3. Ensure function declaration parameters (Pydantic Schema) are JSON-serializable dicts
-_orig_fd_to_mldev = models._FunctionDeclaration_to_mldev
-def _patched_fd_to_mldev(api_client, from_object, parent_object=None):
-    res = _orig_fd_to_mldev(api_client, from_object, parent_object)
-    params = res.get("parameters")
-    if hasattr(params, "model_dump"):
-        res["parameters"] = params.model_dump(exclude_none=True, by_alias=True)
-    return res
-models._FunctionDeclaration_to_mldev = _patched_fd_to_mldev
+# 3. Guarded legacy patch for _FunctionDeclaration_to_mldev if present in older SDK versions
+if hasattr(models, "_FunctionDeclaration_to_mldev"):
+    _orig_fd_to_mldev = getattr(models, "_FunctionDeclaration_to_mldev")
+    def _patched_fd_to_mldev(api_client, from_object, parent_object=None):
+        res = _orig_fd_to_mldev(api_client, from_object, parent_object)
+        params = res.get("parameters")
+        if hasattr(params, "model_dump"):
+            res["parameters"] = params.model_dump(exclude_none=True, by_alias=True)
+        return res
+    models._FunctionDeclaration_to_mldev = _patched_fd_to_mldev
 
 import config
 import database
