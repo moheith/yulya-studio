@@ -453,21 +453,26 @@ async def api_modify_project(request: web.Request) -> web.Response:
                 "model_used": result.get("model_used"),
                 "timestamp": int(time.time())
             })
+            slot = ACTIVE_STUDIO_WS.get(slug, {})
             for live_ws, live_info in list(ACTIVE_LIVE_SESSIONS.items()):
                 if live_info.get("slug") == slug and not live_ws.closed:
                     try:
                         s = live_info.get("session")
                         if s:
+                            parts = []
+                            if slot.get("latest_screen_frame"):
+                                parts.append(types.Part.from_bytes(data=slot["latest_screen_frame"], mime_type="image/jpeg"))
+                            parts.append(types.Part.from_text(
+                                text=(
+                                    f"[System: Antigravity has completed compiling the game: '{result['summary']}'. "
+                                    "The game is now running in the preview iframe on screen! "
+                                    "Tell the creator that their build is complete! Invite them to test playing it, "
+                                    "and remind them they can click the Screenshare button so you can watch them play live, "
+                                    "see how the game feels, and brainstorm next improvements together.]"
+                                )
+                            ))
                             await s.send_client_content(
-                                turns=[types.Content(role="user", parts=[types.Part.from_text(
-                                    text=(
-                                        f"[System: Antigravity has completed compiling the game: '{result['summary']}'. "
-                                        "The game is now running in the preview iframe on screen! "
-                                        "Tell the creator that their build is complete! Invite them to test playing it, "
-                                        "and remind them they can click the Screenshare button so you can watch them play live, "
-                                        "see how the game feels, and brainstorm next improvements together.]"
-                                    )
-                                )])],
+                                turns=[types.Content(role="user", parts=parts)],
                                 turn_complete=True
                             )
                     except Exception:
@@ -1076,7 +1081,9 @@ You are the creative brain, technical director, and pair-programming co-pilot. Y
                 types.LiveConnectConfig(
                     response_modalities=["AUDIO"],
                     system_instruction=types.Content(parts=[types.Part.from_text(text=live_sys_prompt)]),
-                    tools=[architect_tools]
+                    tools=[architect_tools],
+                    output_audio_transcription=types.AudioTranscriptionConfig(),
+                    input_audio_transcription=types.AudioTranscriptionConfig()
                 )
             ),
             (
@@ -1087,7 +1094,9 @@ You are the creative brain, technical director, and pair-programming co-pilot. Y
                     response_modalities=["AUDIO"],
                     system_instruction=types.Content(parts=[types.Part.from_text(text=live_sys_prompt)]),
                     tools=[architect_tools],
-                    thinking_config=types.ThinkingConfig(thinking_level="HIGH", include_thoughts=True)
+                    thinking_config=types.ThinkingConfig(thinking_level="HIGH", include_thoughts=True),
+                    output_audio_transcription=types.AudioTranscriptionConfig(),
+                    input_audio_transcription=types.AudioTranscriptionConfig()
                 )
             ),
             (
@@ -1097,7 +1106,9 @@ You are the creative brain, technical director, and pair-programming co-pilot. Y
                 types.LiveConnectConfig(
                     response_modalities=["AUDIO"],
                     system_instruction=types.Content(parts=[types.Part.from_text(text=live_sys_prompt)]),
-                    tools=[architect_tools]
+                    tools=[architect_tools],
+                    output_audio_transcription=types.AudioTranscriptionConfig(),
+                    input_audio_transcription=types.AudioTranscriptionConfig()
                 )
             )
         ]
@@ -1215,6 +1226,10 @@ async def _run_antigravity_builder(slug: str, session_user: dict, api_key: str, 
             # Notify Gemini Live voice session that build is complete and ready for playtesting / screenshare
             if session and not ws.closed and ws in ACTIVE_LIVE_SESSIONS:
                 try:
+                    slot = ACTIVE_STUDIO_WS.get(slug, {})
+                    parts = []
+                    if slot.get("latest_screen_frame"):
+                        parts.append(types.Part.from_bytes(data=slot["latest_screen_frame"], mime_type="image/jpeg"))
                     notify_text = (
                         f"[System: Antigravity has completed compiling the game: '{res['summary']}'. "
                         "The game is now running in the preview iframe on screen! "
@@ -1222,8 +1237,9 @@ async def _run_antigravity_builder(slug: str, session_user: dict, api_key: str, 
                         "and remind them they can click the Screenshare button so you can watch them play live, "
                         "see how the game feels, and brainstorm next improvements together.]"
                     )
+                    parts.append(types.Part.from_text(text=notify_text))
                     await session.send_client_content(
-                        turns=[types.Content(role="user", parts=[types.Part.from_text(text=notify_text)])],
+                        turns=[types.Content(role="user", parts=parts)],
                         turn_complete=True
                     )
                 except Exception as notify_err:
@@ -1294,6 +1310,26 @@ async def _live_receive_loop(ws: web.WebSocketResponse, slug: str, session, api_
                                             "type": "ai_text",
                                             "text": part.text
                                         })
+
+                        # Real-time spoken voice transcription from Gemini Live:
+                        out_tx = getattr(server_content, "output_transcription", None)
+                        if out_tx and getattr(out_tx, "text", None):
+                            ai_speech_chunk = out_tx.text
+                            if ai_speech_chunk and not ws.closed:
+                                await ws.send_json({
+                                    "type": "ai_text",
+                                    "text": ai_speech_chunk
+                                })
+
+                        # Real-time microphone audio transcription from user:
+                        in_tx = getattr(server_content, "input_transcription", None)
+                        if in_tx and getattr(in_tx, "text", None):
+                            user_speech_chunk = in_tx.text
+                            if user_speech_chunk and not ws.closed:
+                                await ws.send_json({
+                                    "type": "user_transcription",
+                                    "text": user_speech_chunk
+                                })
                                         
                         if server_content.turn_complete:
                             if not ws.closed:
@@ -1697,7 +1733,7 @@ async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
                                     pcm_bytes = base64.b64decode(pcm_b64)
                                     live_sess = ACTIVE_LIVE_SESSIONS[ws]["session"]
                                     await live_sess.send_realtime_input(
-                                        media=types.Blob(data=pcm_bytes, mime_type="audio/pcm;rate=16000")
+                                        audio=types.Blob(data=pcm_bytes, mime_type="audio/pcm;rate=16000")
                                     )
                                 except Exception as audio_err:
                                     print(f"[AUDIO CHUNK SEND ERROR] {audio_err}")
@@ -1710,8 +1746,12 @@ async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
                             try:
                                 if transcript:
                                     # Send recognized speech transcript to guarantee 100% accurate comprehension
+                                    parts = []
+                                    if slot.get("latest_screen_frame"):
+                                        parts.append(types.Part.from_bytes(data=slot["latest_screen_frame"], mime_type="image/jpeg"))
+                                    parts.append(types.Part.from_text(text=transcript))
                                     await live_sess.send_client_content(
-                                        turns=[types.Content(role="user", parts=[types.Part.from_text(text=transcript)])],
+                                        turns=[types.Content(role="user", parts=parts)],
                                         turn_complete=True
                                     )
                                 else:
@@ -1725,8 +1765,12 @@ async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
                             text_input = data.get("text", "").strip()
                             if text_input:
                                 live_sess = ACTIVE_LIVE_SESSIONS[ws]["session"]
+                                parts = []
+                                if slot.get("latest_screen_frame"):
+                                    parts.append(types.Part.from_bytes(data=slot["latest_screen_frame"], mime_type="image/jpeg"))
+                                parts.append(types.Part.from_text(text=f"The creator typed in chat: \"{text_input}\". Reply naturally in voice to help them design and build their game!"))
                                 await live_sess.send_client_content(
-                                    turns=[types.Content(role="user", parts=[types.Part.from_text(text=f"The creator typed in chat: \"{text_input}\". Reply naturally in voice to help them design and build their game!")])],
+                                    turns=[types.Content(role="user", parts=parts)],
                                     turn_complete=True
                                 )
                                 await broadcast_project_log(slug, f"[VOICE] User sent chat message: \"{text_input[:60]}...\"", "voice")
@@ -1765,30 +1809,74 @@ async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
                                 live_sess = ACTIVE_LIVE_SESSIONS.get(ws, {}).get("session")
                                 if live_sess:
                                     try:
+                                        parts = []
+                                        if slot.get("latest_screen_frame"):
+                                            parts.append(types.Part.from_bytes(data=slot["latest_screen_frame"], mime_type="image/jpeg"))
+                                        parts.append(types.Part.from_text(text=f"[System: The creator submitted the prompt to Antigravity: '{prompt}'. Tell the creator you see they launched the build and Antigravity is coding now! Keep chatting with them while it compiles.]"))
                                         await live_sess.send_client_content(
-                                            turns=[types.Content(role="user", parts=[types.Part.from_text(text=f"[System: The creator submitted the prompt to Antigravity: '{prompt}'. Tell the creator you see they launched the build and Antigravity is coding now! Keep chatting with them while it compiles.]")])],
+                                            turns=[types.Content(role="user", parts=parts)],
                                             turn_complete=True
                                         )
                                     except Exception:
                                         pass
                                 asyncio.create_task(_run_antigravity_builder(slug, session_user, api_key, prompt, ws, live_sess, preferred_model=code_model))
-                                    
+
+                    elif msg_type == "screenshare_status":
+                        is_active = bool(data.get("active", False))
+                        slot["screenshare_active"] = is_active
+                        if is_active:
+                            await broadcast_project_log(slug, "[VISION] Screenshare started. Gemini Live vision is actively observing your screen.", "live")
+                            if ws in ACTIVE_LIVE_SESSIONS:
+                                try:
+                                    live_sess = ACTIVE_LIVE_SESSIONS[ws]["session"]
+                                    greet_parts = []
+                                    if slot.get("latest_screen_frame"):
+                                        greet_parts.append(types.Part.from_bytes(data=slot["latest_screen_frame"], mime_type="image/jpeg"))
+                                    creator_name = session_user.get("username", "creator")
+                                    greet_parts.append(types.Part.from_text(
+                                        text=(
+                                            f"[System: The creator @{creator_name} has just turned on Screenshare to share their live screen and gameplay! "
+                                            "You can now actively observe their game canvas and code. "
+                                            "Speak immediately right now in voice: Enthusiastically confirm that you can see their screen, "
+                                            "briefly mention what is currently visible on their screen or game canvas, and invite them to play or test!]"
+                                        )
+                                    ))
+                                    await live_sess.send_client_content(
+                                        turns=[types.Content(role="user", parts=greet_parts)],
+                                        turn_complete=True
+                                    )
+                                except Exception as vision_err:
+                                    print(f"[VISION GREET ERROR] {vision_err}")
+                        else:
+                            slot["latest_screen_frame"] = None
+                            await broadcast_project_log(slug, "[VISION] Screenshare stopped.", "info")
+
                     elif msg_type == "video_frame":
                         # Audit Point 15: Server-side frame size and rate controls
                         frame_data = data.get("data")
                         if frame_data and len(frame_data) <= 1_500_000:
                             last_frame = slot.get("last_frame", 0)
-                            if now - last_frame >= 0.25: # Max 4 FPS
+                            if now - last_frame >= 0.35: # Max ~2.8 FPS
                                 slot["last_frame"] = now
-                                if ws in ACTIVE_LIVE_SESSIONS:
-                                    try:
-                                        jpeg_bytes = base64.b64decode(frame_data)
+                                try:
+                                    jpeg_bytes = base64.b64decode(frame_data)
+                                    slot["latest_screen_frame"] = jpeg_bytes
+
+                                    if ws in ACTIVE_LIVE_SESSIONS:
                                         live_sess = ACTIVE_LIVE_SESSIONS[ws]["session"]
                                         await live_sess.send_realtime_input(
-                                            media=types.Blob(data=jpeg_bytes, mime_type="image/jpeg")
+                                            video=types.Blob(data=jpeg_bytes, mime_type="image/jpeg")
                                         )
-                                    except Exception:
-                                        pass
+
+                                    # Broadcast screen frame to spectators and connected peers
+                                    for client_ws in slot.get("creator", set()):
+                                        if client_ws != ws and not client_ws.closed:
+                                            try:
+                                                await client_ws.send_json({"type": "screen_frame", "data": frame_data})
+                                            except Exception:
+                                                pass
+                                except Exception as frame_err:
+                                    print(f"[VIDEO FRAME ERROR] {frame_err}")
                                 
                 except Exception as e:
                     print(f"[WS] Error handling message: {e}")

@@ -1825,12 +1825,62 @@
       feed.scrollTop = feed.scrollHeight;
     }
 
+    let currentUserChatBubble = null;
+    let currentUserChatText = '';
+
+    function appendUserChatText(chunk) {
+      if (!chunk) return;
+      const feed = document.getElementById('chatFeed');
+      if (!feed) return;
+      const hint = document.getElementById('chatEmptyHint');
+      if (hint) hint.style.display = 'none';
+
+      if (!currentUserChatBubble) {
+        const now = new Date();
+        const time = now.toTimeString().split(' ')[0];
+
+        const row = document.createElement('div');
+        row.className = 'chat-bubble-row user';
+
+        const header = document.createElement('div');
+        header.className = 'chat-bubble-header';
+        header.innerHTML = `<span style="color: #38bdf8; font-weight: 700;">YOU</span><span>${time}</span>`;
+
+        const bubble = document.createElement('div');
+        bubble.className = 'chat-bubble user';
+
+        row.appendChild(header);
+        row.appendChild(bubble);
+        feed.appendChild(row);
+
+        currentUserChatBubble = bubble;
+        currentUserChatText = '';
+      }
+
+      currentUserChatText += chunk;
+      currentUserChatBubble.textContent = currentUserChatText;
+      feed.scrollTop = feed.scrollHeight;
+    }
+
+    function finalizeUserChatTurn() {
+      if (currentUserChatText.trim()) {
+        const now = new Date();
+        chatHistory.push({ sender: 'user', text: currentUserChatText.trim(), time: now.toTimeString().split(' ')[0] });
+      }
+      currentUserChatBubble = null;
+      currentUserChatText = '';
+    }
+
     function appendAiChatText(chunk) {
       if (!chunk) return;
       const feed = document.getElementById('chatFeed');
       if (!feed) return;
       const hint = document.getElementById('chatEmptyHint');
       if (hint) hint.style.display = 'none';
+
+      if (currentUserChatBubble) {
+        finalizeUserChatTurn();
+      }
 
       if (!currentAiChatBubble) {
         const now = new Date();
@@ -1841,7 +1891,8 @@
 
         const header = document.createElement('div');
         header.className = 'chat-bubble-header';
-        header.innerHTML = `<span style="color: #c084fc; font-weight: 700;">GEMINI 3.8 LIVE</span><span>${time}</span>`;
+        const label = formatVoiceModelName(selectedVoiceModel) || 'GEMINI LIVE';
+        header.innerHTML = `<span style="color: #c084fc; font-weight: 700;">${label}</span><span>${time}</span>`;
 
         const bubble = document.createElement('div');
         bubble.className = 'chat-bubble ai';
@@ -1854,11 +1905,7 @@
         currentAiChatText = '';
       }
 
-      if (currentAiChatText && chunk.startsWith(currentAiChatText)) {
-        currentAiChatText = chunk;
-      } else if (!currentAiChatText || !currentAiChatText.includes(chunk)) {
-        currentAiChatText += (currentAiChatText && !currentAiChatText.endsWith(' ') && !chunk.startsWith(' ') ? ' ' : '') + chunk;
-      }
+      currentAiChatText += chunk;
       currentAiChatBubble.textContent = currentAiChatText;
       feed.scrollTop = feed.scrollHeight;
     }
@@ -2282,19 +2329,23 @@
               }
             } else if (data.type === 'ai_text') {
               appendAiChatText(data.text);
+            } else if (data.type === 'user_transcription') {
+              appendUserChatText(data.text);
             } else if (data.type === 'ai_turn_complete') {
               if (isAiSpeakingVoice) {
                 isAiSpeakingVoice = false;
                 logTerminal('[VOICE] Gemini Live turn complete.', 'voice');
               }
-              setLiveStatus('Gemini 3.8 Live Ready', 'online');
+              setLiveStatus(voiceMode === 'continuous' ? 'Continuous Voice Active' : (formatVoiceModelName(selectedVoiceModel) + ' Ready'), voiceMode === 'continuous' ? 'listening' : 'online');
               finalizeAiChatTurn();
+              finalizeUserChatTurn();
             } else if (data.type === 'ai_interrupted') {
               if (isAiSpeakingVoice) {
                 isAiSpeakingVoice = false;
               }
               liveAudioPlayer.stop();
               finalizeAiChatTurn();
+              finalizeUserChatTurn();
               logTerminal('[LIVE_AI] Speech interrupted by user input', 'live');
             } else if (data.type === 'live_status') {
               if (data.status === 'connected') {
@@ -2862,13 +2913,21 @@
         btn.classList.add('btn-outline');
         badge.classList.remove('active');
         logTerminal('Screenshare stopped. AI vision stream closed.', 'info');
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'screenshare_status', active: false }));
+        }
         return;
       }
 
       if (!isLiveConnected) {
-        ToastManager.show('Please connect to the Live AI call first before starting Screenshare.', 'warning');
-        logTerminal('[CALL] Screenshare requires an active Gemini Live call. Please click "Connect Live AI" first.', 'warning');
-        return;
+        ToastManager.show('Connecting to Live AI call first...', 'info');
+        connectLiveAI();
+        await new Promise(r => setTimeout(r, 1200));
+        if (!isLiveConnected) {
+          ToastManager.show('Please connect to Gemini Live AI before starting Screenshare.', 'warning');
+          logTerminal('[CALL] Screenshare requires an active Gemini Live call. Please click "Connect Live AI" first.', 'warning');
+          return;
+        }
       }
 
       try {
@@ -2877,31 +2936,61 @@
             width: { ideal: 1920 },
             height: { ideal: 1080 },
             frameRate: { ideal: 2, max: 5 }
-          }
+          },
+          audio: false
         });
         btn.classList.remove('btn-outline');
         btn.classList.add('btn-primary');
         badge.classList.add('active');
         logTerminal('Screenshare active (1080p @ 2 FPS). Gemini Live is now actively observing your gameplay and canvas.', 'success');
+        ToastManager.show('Screenshare active — Gemini Live can see your screen!', 'success');
 
         const video = document.createElement('video');
+        video.muted = true;
+        video.playsInline = true;
+        video.autoplay = true;
         video.srcObject = screenStream;
-        video.play();
+        await video.play().catch(e => console.warn('[VISION] Video play warn:', e));
+
+        if (video.readyState < 2) {
+          await new Promise(r => {
+            video.onloadeddata = r;
+            video.onloadedmetadata = r;
+            setTimeout(r, 500);
+          });
+        }
 
         const canvas = document.createElement('canvas');
         canvas.width = 1920;
         canvas.height = 1080;
         const ctx = canvas.getContext('2d');
 
-        screenInterval = setInterval(() => {
+        const captureAndSend = () => {
           if (!screenStream || !ws || ws.readyState !== WebSocket.OPEN) return;
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          const base64 = canvas.toDataURL('image/jpeg', 0.65).split(',')[1];
-          ws.send(JSON.stringify({ type: 'video_frame', data: base64 }));
-        }, 500); // 2 frames per second (500ms interval)
+          try {
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const base64 = canvas.toDataURL('image/jpeg', 0.65).split(',')[1];
+            if (base64) {
+              ws.send(JSON.stringify({ type: 'video_frame', data: base64 }));
+            }
+          } catch (e) {
+            console.warn('[VISION] Frame capture error:', e);
+          }
+        };
+
+        // Notify server that screenshare started and send initial frame immediately
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'screenshare_status', active: true }));
+        }
+        captureAndSend();
+
+        screenInterval = setInterval(captureAndSend, 500); // 2 frames per second (500ms interval)
 
         screenStream.getVideoTracks()[0].onended = () => toggleScreenShare();
       } catch (err) {
+        btn.classList.remove('btn-primary');
+        btn.classList.add('btn-outline');
+        badge.classList.remove('active');
         logTerminal(`Screenshare access denied: ${err.message}`, 'warning');
       }
     }
