@@ -80,10 +80,11 @@ def truncate_context(content: str, max_chars: int = 100000) -> str:
     half = max_chars // 2
     return content[:half] + "\n/* ... [context truncated for length] ... */\n" + content[-half:]
 
-async def process_code_request(api_key: str, user_id: int, username: str, slug: str, prompt: str, log_callback=None) -> dict:
+async def process_code_request(api_key: str, user_id: int, username: str, slug: str, prompt: str, log_callback=None, preferred_model: str = None) -> dict:
     """
     Executes an AI code creation or modification request using the user's personal Gemini API key.
     Uses per-project locks, Antigravity CLI activity steps, build.log persistence, and strict path sandboxing.
+    Supports preferred_model selection with automatic waterfall shifting on error.
     """
     try:
         user_id_int = int(user_id)
@@ -161,99 +162,106 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
             "existing_code": existing_code
         }
         
-        def _call_gemini():
-            client = genai.Client(api_key=cleaned_key)
-            last_err = None
-            # Multi-model waterfall strictly configured to user specification:
-            # 1. Gemini 3.8 Flash
-            # 2. Gemini 3.7 Flash
-            # 3. Gemini 3.6 Flash
-            # 4. gemini-3.5-flash
-            # 5. gemini-3.1-flash-lite
-            # 6. gemini-3.5-flash-lite
-            # (with gemini-2.5-flash as resilient emergency fallback)
-            for model_name in [
-                "gemini-3.8-flash",
-                "gemini-3.7-flash",
-                "gemini-3.6-flash",
-                "gemini-3.5-flash",
-                "gemini-3.1-flash-lite",
-                "gemini-3.5-flash-lite",
-                "gemini-2.5-flash"
-            ]:
-                try:
-                    cfg_kwargs = {
-                        "system_instruction": SYSTEM_PROMPT,
-                        "response_mime_type": "application/json",
-                    }
-                    # Omit deprecated sampling parameters for Gemini 3.8 Flash per Google migration guide
-                    if not model_name.startswith("gemini-3.8"):
-                        cfg_kwargs["temperature"] = 0.4
-                    response = client.models.generate_content(
-                        model=model_name,
-                        contents=json.dumps(context_payload),
-                        config=types.GenerateContentConfig(**cfg_kwargs)
-                    )
-                    if response and response.text:
-                        return response.text
-                except APIError as ae:
-                    last_err = ae
-                    err_str = str(ae)
-                    # If quota (429), model retired (404), or server demand spikes (500-504), cascade to next model in waterfall
-                    if "RESOURCE_EXHAUSTED" in err_str or ae.code in (429, 404, 500, 502, 503, 504):
-                        continue
-                    # If invalid API key (400, 403), stop immediately
-                    if "API_KEY_INVALID" in err_str or ae.code in (400, 403):
-                        raise ae
-                    continue
-                except Exception as e:
-                    last_err = e
-                    continue
-            if last_err:
-                raise last_err
-            raise RuntimeError("All models in the generation waterfall failed.")
-            
-        try:
-            # 3000 second timeout on AI code generation allowing deep reasoning & debugging
-            raw_response = await asyncio.wait_for(asyncio.to_thread(_call_gemini), timeout=3000.0)
-        except asyncio.TimeoutError:
-            err_msg = "Google AI Studio request timed out after 3000 seconds."
-            fail_step = f"[FAIL] {err_msg}"
-            projects_manager.write_build_log(user_id_int, safe_slug, "FAIL", fail_step)
+        base_models = [
+            "gemini-3.8-flash",
+            "gemini-3.7-flash",
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+            "gemini-3.1-flash-lite",
+            "gemini-3.5-flash-lite",
+            "gemini-2.5-flash"
+        ]
+        if preferred_model and preferred_model.strip():
+            pref = preferred_model.strip().lower()
+            model_cascade = [pref] + [m for m in base_models if m.lower() != pref]
+        else:
+            model_cascade = base_models
+
+        client = genai.Client(api_key=cleaned_key)
+        raw_response = None
+        used_model = None
+        last_err = None
+
+        for idx, model_name in enumerate(model_cascade):
+            arch_step = f"[ARCHITECT] Compiling via {model_name}..."
+            projects_manager.write_build_log(user_id_int, safe_slug, "ARCHITECT", arch_step)
             if log_callback:
-                try: await log_callback("fail", fail_step)
+                try: await log_callback("architect", arch_step)
                 except Exception: pass
-            return {
-                "success": False,
-                "error": "Yulya couldn't finish the request. The Google AI Studio request timed out. Please try again."
-            }
-        except APIError as ae:
-            err_msg = str(ae)
-            user_err = f"Google AI Studio returned an error: {err_msg[:120]}"
-            if "RESOURCE_EXHAUSTED" in err_msg or ae.code == 429:
-                user_err = "Google AI Studio quota reached. Your API key has reached its current usage limit."
-            elif "API_KEY_INVALID" in err_msg or ae.code in [400, 403]:
-                user_err = "Your Google AI Studio API key could not be verified by Google AI."
+
+            def _try_single_call(m=model_name):
+                cfg_kwargs = {
+                    "system_instruction": SYSTEM_PROMPT,
+                    "response_mime_type": "application/json",
+                }
+                if not m.startswith("gemini-3.8"):
+                    cfg_kwargs["temperature"] = 0.4
+                resp = client.models.generate_content(
+                    model=m,
+                    contents=json.dumps(context_payload),
+                    config=types.GenerateContentConfig(**cfg_kwargs)
+                )
+                if resp and resp.text:
+                    return resp.text
+                return None
+
+            try:
+                raw_response = await asyncio.wait_for(asyncio.to_thread(_try_single_call), timeout=180.0)
+                if raw_response:
+                    used_model = model_name
+                    break
+            except asyncio.TimeoutError:
+                last_err = TimeoutError(f"Model {model_name} timed out after 180 seconds.")
+                next_model = model_cascade[idx + 1] if idx + 1 < len(model_cascade) else None
+                if next_model:
+                    shift_step = f"[ARCHITECT] Model '{model_name}' timed out. Shifting to fallback '{next_model}'..."
+                    projects_manager.write_build_log(user_id_int, safe_slug, "ARCHITECT", shift_step)
+                    if log_callback:
+                        try: await log_callback("architect", shift_step)
+                        except Exception: pass
+                continue
+            except APIError as ae:
+                last_err = ae
+                err_str = str(ae)
+                # If invalid API key (400, 403), stop immediately
+                if "API_KEY_INVALID" in err_str or ae.code in (400, 403):
+                    user_err = "Your Google AI Studio API key could not be verified by Google AI."
+                    fail_step = f"[FAIL] {user_err}"
+                    projects_manager.write_build_log(user_id_int, safe_slug, "FAIL", fail_step)
+                    if log_callback:
+                        try: await log_callback("fail", fail_step)
+                        except Exception: pass
+                    return {"success": False, "error": user_err}
+                next_model = model_cascade[idx + 1] if idx + 1 < len(model_cascade) else None
+                if next_model:
+                    shift_step = f"[ARCHITECT] Model '{model_name}' error ({ae.code}). Shifting to fallback '{next_model}'..."
+                    projects_manager.write_build_log(user_id_int, safe_slug, "ARCHITECT", shift_step)
+                    if log_callback:
+                        try: await log_callback("architect", shift_step)
+                        except Exception: pass
+                continue
+            except Exception as e:
+                last_err = e
+                next_model = model_cascade[idx + 1] if idx + 1 < len(model_cascade) else None
+                if next_model:
+                    shift_step = f"[ARCHITECT] Model '{model_name}' unavailable ({str(e)[:40]}). Shifting to fallback '{next_model}'..."
+                    projects_manager.write_build_log(user_id_int, safe_slug, "ARCHITECT", shift_step)
+                    if log_callback:
+                        try: await log_callback("architect", shift_step)
+                        except Exception: pass
+                continue
+
+        if not raw_response:
+            err_msg = str(last_err) if last_err else "All models in the generation waterfall failed."
+            user_err = f"AI code generation failed across models: {err_msg[:120]}"
+            if "RESOURCE_EXHAUSTED" in err_msg:
+                user_err = "Google AI Studio quota reached across all tested models. Please wait a moment and try again."
             fail_step = f"[FAIL] {user_err}"
             projects_manager.write_build_log(user_id_int, safe_slug, "FAIL", fail_step)
             if log_callback:
                 try: await log_callback("fail", fail_step)
                 except Exception: pass
-            return {
-                "success": False,
-                "error": user_err
-            }
-        except Exception as e:
-            user_err = f"Failed to connect to Google AI Studio: {str(e)[:120]}"
-            fail_step = f"[FAIL] {user_err}"
-            projects_manager.write_build_log(user_id_int, safe_slug, "FAIL", fail_step)
-            if log_callback:
-                try: await log_callback("fail", fail_step)
-                except Exception: pass
-            return {
-                "success": False,
-                "error": user_err
-            }
+            return {"success": False, "error": user_err}
             
         try:
             # Clean markdown code blocks if the model wrapped output anyway
@@ -479,6 +487,7 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
                 
             return {
                 "success": True,
+                "model_used": used_model,
                 "summary": summary,
                 "files": saved_files,
                 "content": updated_content,

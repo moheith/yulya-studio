@@ -434,12 +434,14 @@ async def api_modify_project(request: web.Request) -> web.Response:
         if not api_key:
             return web.json_response({"success": False, "error": "No Google AI Studio API key saved. Please set up your key first."}, status=400)
             
+        model = body.get("model")
+
         # Broadcast Antigravity CLI log steps to connected WebSockets
         async def _log_callback(step_type, message_text):
             await broadcast_project_log(slug, message_text, step_type)
             
         result = await ai_engine.process_code_request(
-            api_key, user["id"], user["username"], slug, prompt, log_callback=_log_callback
+            api_key, user["id"], user["username"], slug, prompt, log_callback=_log_callback, preferred_model=model
         )
         
         if result.get("success"):
@@ -448,6 +450,7 @@ async def api_modify_project(request: web.Request) -> web.Response:
                 "type": "code_update",
                 "summary": result["summary"],
                 "content": result["content"],
+                "model_used": result.get("model_used"),
                 "timestamp": int(time.time())
             })
             for live_ws, live_info in list(ACTIVE_LIVE_SESSIONS.items()):
@@ -455,15 +458,17 @@ async def api_modify_project(request: web.Request) -> web.Response:
                     try:
                         s = live_info.get("session")
                         if s:
-                            await s.send(
-                                input=(
-                                    f"[System: Antigravity has completed compiling the game: '{result['summary']}'. "
-                                    "The game is now running in the preview iframe on screen! "
-                                    "Tell the creator that their build is complete! Invite them to test playing it, "
-                                    "and remind them they can click the Screenshare button so you can watch them play live, "
-                                    "see how the game feels, and brainstorm next improvements together.]"
-                                ),
-                                end_of_turn=True
+                            await s.send_client_content(
+                                turns=[types.Content(role="user", parts=[types.Part.from_text(
+                                    text=(
+                                        f"[System: Antigravity has completed compiling the game: '{result['summary']}'. "
+                                        "The game is now running in the preview iframe on screen! "
+                                        "Tell the creator that their build is complete! Invite them to test playing it, "
+                                        "and remind them they can click the Screenshare button so you can watch them play live, "
+                                        "see how the game feels, and brainstorm next improvements together.]"
+                                    )
+                                )])],
+                                turn_complete=True
                             )
                     except Exception:
                         pass
@@ -806,10 +811,10 @@ async def api_save_project_log(request: web.Request) -> web.Response:
 
 # --- Gemini 3.8 Live Multimodal Session Bridge ---
 
-async def start_gemini_live_session(ws: web.WebSocketResponse, slug: str, session_user: dict):
+async def start_gemini_live_session(ws: web.WebSocketResponse, slug: str, session_user: dict, preferred_model: str = None):
     """
-    Initializes a bi-directional Gemini 3.8 Live session using the user's personal API key.
-    Configured strictly for Gemini 3.8 Live Extended Thinking on High without waterfall.
+    Initializes a bi-directional Gemini Live session using the user's personal API key.
+    Supports preferred_model selection with automatic waterfall cascade to fallback models on error.
     """
     try:
         user_id = session_user["id"]
@@ -833,14 +838,22 @@ async def start_gemini_live_session(ws: web.WebSocketResponse, slug: str, sessio
         # Close existing session for this socket if any
         await stop_gemini_live_session(ws)
 
+        target_display = "Gemini 3.8 Live"
+        if preferred_model == "gemini-3.8-live-extended-thinking":
+            target_display = "Gemini 3.8 Live Extended Thinking (High)"
+        elif preferred_model == "gemini-3.8-live":
+            target_display = "Gemini 3.8 Live — Standard"
+        elif preferred_model == "gemini-3.1-flash-live-preview":
+            target_display = "Gemini 3.1 Live Preview"
+
         # Notify UI that connection handshake is active
         if not ws.closed:
             await ws.send_json({
                 "type": "live_status",
                 "status": "connecting",
-                "message": "Connecting to Gemini 3.8 Live Extended Thinking (High)..."
+                "message": f"Connecting to {target_display}..."
             })
-        await broadcast_project_log(slug, "[LIVE] Connecting to Gemini 3.8 Live Extended Thinking (High)...", "live")
+        await broadcast_project_log(slug, f"[LIVE] Connecting to {target_display}...", "live")
 
         # Read existing project files dynamically for immediate context
         repo_files = projects_manager.list_project_files(user_id, slug)
@@ -1053,10 +1066,19 @@ You are the creative brain, technical director, and pair-programming co-pilot. Y
         client = genai.Client(api_key=api_key.strip())
 
         # Connection cascade for Gemini Live models using typed LiveConnectConfig:
-        # 1. gemini-3.8-live-extended-thinking (requires thinking_level="HIGH")
-        # 2. gemini-3.8-live (does not support thinking_level)
-        # 3. gemini-3.1-flash-live-preview (preview fallback)
+        # Default order prefers gemini-3.8-live (fast & reliable function calling),
+        # but re-prioritizes whichever model the user selected via UI.
         live_candidates = [
+            (
+                "gemini-3.8-live",
+                "Gemini 3.8 Live — Standard",
+                False,
+                types.LiveConnectConfig(
+                    response_modalities=["AUDIO"],
+                    system_instruction=types.Content(parts=[types.Part.from_text(text=live_sys_prompt)]),
+                    tools=[architect_tools]
+                )
+            ),
             (
                 "gemini-3.8-live-extended-thinking",
                 "Gemini 3.8 Live Extended Thinking — HIGH",
@@ -1066,16 +1088,6 @@ You are the creative brain, technical director, and pair-programming co-pilot. Y
                     system_instruction=types.Content(parts=[types.Part.from_text(text=live_sys_prompt)]),
                     tools=[architect_tools],
                     thinking_config=types.ThinkingConfig(thinking_level="HIGH", include_thoughts=True)
-                )
-            ),
-            (
-                "gemini-3.8-live",
-                "Gemini 3.8 Live — Standard",
-                False,
-                types.LiveConnectConfig(
-                    response_modalities=["AUDIO"],
-                    system_instruction=types.Content(parts=[types.Part.from_text(text=live_sys_prompt)]),
-                    tools=[architect_tools]
                 )
             ),
             (
@@ -1090,13 +1102,17 @@ You are the creative brain, technical director, and pair-programming co-pilot. Y
             )
         ]
 
+        if preferred_model and preferred_model.strip():
+            pref_clean = preferred_model.strip().lower()
+            live_candidates.sort(key=lambda c: 0 if c[0].lower() == pref_clean else 1)
+
         session = None
         live_cm = None
         connected_model = None
         is_extended_thinking = False
         candidate_errors = []
 
-        for model_name, display_name, has_et, connect_cfg in live_candidates:
+        for idx, (model_name, display_name, has_et, connect_cfg) in enumerate(live_candidates):
             try:
                 cm = client.aio.live.connect(model=model_name, config=connect_cfg)
                 session = await cm.__aenter__()
@@ -1108,6 +1124,10 @@ You are the creative brain, technical director, and pair-programming co-pilot. Y
             except Exception as conn_err:
                 print(f"[LIVE] Connection attempt to {model_name} failed: {conn_err}")
                 candidate_errors.append(f"{model_name}: {conn_err}")
+                next_cand = live_candidates[idx + 1] if idx + 1 < len(live_candidates) else None
+                if next_cand:
+                    shift_msg = f"[LIVE_FALLBACK] {display_name} unavailable ({str(conn_err)[:60]}). Shifting to {next_cand[1]}..."
+                    await broadcast_project_log(slug, shift_msg, "live_error")
 
         if not session or not live_cm:
             err_summary = "; ".join(candidate_errors)
@@ -1160,11 +1180,11 @@ You are the creative brain, technical director, and pair-programming co-pilot. Y
             })
         await broadcast_project_log(slug, f"[LIVE_ERROR] {err_msg[:140]}", "error")
 
-async def _run_antigravity_builder(slug: str, session_user: dict, api_key: str, instruction: str, ws: web.WebSocketResponse, session=None):
+async def _run_antigravity_builder(slug: str, session_user: dict, api_key: str, instruction: str, ws: web.WebSocketResponse, session=None, preferred_model: str = None):
     """
     Executes Antigravity code generation in a background task so the Gemini Live voice call
     and receive loop stay unblocked. Creator can continue speaking with Gemini Live while coding runs.
-    Enforces centralized build admission controller tracking.
+    Enforces centralized build admission controller tracking and preferred model cascade.
     """
     build_key = (session_user["id"], slug.lower())
     ACTIVE_PROJECT_BUILDS.add(build_key)
@@ -1176,7 +1196,7 @@ async def _run_antigravity_builder(slug: str, session_user: dict, api_key: str, 
             await broadcast_project_log(slug, msg_text, step_type)
 
         res = await ai_engine.process_code_request(
-            api_key, session_user["id"], session_user["username"], slug, instruction, log_callback=_cb
+            api_key, session_user["id"], session_user["username"], slug, instruction, log_callback=_cb, preferred_model=preferred_model
         )
 
         if not ws.closed:
@@ -1187,6 +1207,7 @@ async def _run_antigravity_builder(slug: str, session_user: dict, api_key: str, 
                 "type": "code_update",
                 "summary": res["summary"],
                 "content": res["content"],
+                "model_used": res.get("model_used"),
                 "timestamp": int(time.time())
             })
             await broadcast_project_log(slug, f"[PASS] {res['summary']}", "pass")
@@ -1292,10 +1313,13 @@ async def _live_receive_loop(ws: web.WebSocketResponse, slug: str, session, api_
                     tool_call = response.tool_call
                     if tool_call and tool_call.function_calls:
                         for fc in tool_call.function_calls:
+                            call_id = fc.id or f"call_{int(time.time()*1000)}"
+                            args = fc.args if isinstance(fc.args, dict) else {}
+
                             if fc.name == "draft_prompt_to_input":
-                                drafted_prompt = fc.args.get("prompt", "").strip()
+                                drafted_prompt = str(args.get("prompt", "") or args.get("instruction", "")).strip()
                                 await broadcast_project_log(slug, f"[TOOL] Live AI invoked draft_prompt_to_input: \"{drafted_prompt[:80]}...\"", "tool")
-                                if not ws.closed:
+                                if not ws.closed and drafted_prompt:
                                     await ws.send_json({
                                         "type": "set_command_input",
                                         "text": drafted_prompt
@@ -1312,14 +1336,14 @@ async def _live_receive_loop(ws: web.WebSocketResponse, slug: str, session, api_
                                 try:
                                     await session.send_tool_response(
                                         function_responses=[
-                                            types.FunctionResponse(name=fc.name, id=fc.id, response=resp_dict)
+                                            types.FunctionResponse(name=fc.name, id=call_id, response=resp_dict)
                                         ]
                                     )
                                 except Exception as e:
                                     print(f"[LIVE TOOL SEND ERROR] {e}")
 
                             elif fc.name in ("send_prompt_to_antigravity", "modify_game_code"):
-                                instruction = fc.args.get("instruction", "").strip()
+                                instruction = str(args.get("instruction", "") or args.get("prompt", "")).strip()
                                 await broadcast_project_log(slug, f"[TOOL] Live AI invoked send_prompt_to_antigravity: \"{instruction[:80]}...\"", "tool")
                                 await broadcast_project_log(slug, f"[ARCHITECT_BUILD] Build prompt sent to Antigravity: \"{instruction[:80]}...\"", "user")
                                 if not ws.closed:
@@ -1333,7 +1357,7 @@ async def _live_receive_loop(ws: web.WebSocketResponse, slug: str, session, api_
                                 try:
                                     await session.send_tool_response(
                                         function_responses=[
-                                            types.FunctionResponse(name=fc.name, id=fc.id, response=resp_dict)
+                                            types.FunctionResponse(name=fc.name, id=call_id, response=resp_dict)
                                         ]
                                     )
                                 except Exception as e:
@@ -1343,129 +1367,188 @@ async def _live_receive_loop(ws: web.WebSocketResponse, slug: str, session, api_
                                 asyncio.create_task(_run_antigravity_builder(slug, session_user, api_key, instruction, ws, session))
 
                             elif fc.name == "get_project_summary":
-                                user_id_val = int(session_user.get("id") or session_user.get("user_id", 0))
-                                manifest = projects_manager.get_project_manifest(user_id_val, slug)
-                                pfiles = projects_manager.list_project_files(user_id_val, slug)
-                                await broadcast_project_log(slug, f"[TOOL] Live AI inspected project summary: {len(pfiles)} files, engine: {manifest.get('engine')}", "tool")
+                                try:
+                                    user_id_val = int(session_user.get("id") or session_user.get("user_id", 0))
+                                    manifest = projects_manager.get_project_manifest(user_id_val, slug)
+                                    pfiles = projects_manager.list_project_files(user_id_val, slug)
+                                    resp_data = {"manifest": manifest, "files": pfiles}
+                                    await broadcast_project_log(slug, f"[TOOL] Live AI inspected project summary: {len(pfiles)} files, engine: {manifest.get('engine')}", "tool")
+                                except Exception as err:
+                                    resp_data = {"error": str(err), "manifest": {}, "files": []}
+                                    await broadcast_project_log(slug, f"[TOOL_ERROR] get_project_summary failed: {err}", "error")
                                 try:
                                     await session.send_tool_response(
                                         function_responses=[
-                                            types.FunctionResponse(name=fc.name, id=fc.id, response={"manifest": manifest, "files": pfiles})
+                                            types.FunctionResponse(name=fc.name, id=call_id, response=resp_data)
                                         ]
                                     )
                                 except Exception as e:
                                     print(f"[LIVE TOOL SEND ERROR] {e}")
 
                             elif fc.name == "list_project_files":
-                                user_id_val = int(session_user.get("id") or session_user.get("user_id", 0))
-                                pfiles = projects_manager.list_project_files(user_id_val, slug)
-                                await broadcast_project_log(slug, f"[TOOL] Live AI listed files: {', '.join(pfiles[:5])}", "tool")
+                                try:
+                                    user_id_val = int(session_user.get("id") or session_user.get("user_id", 0))
+                                    pfiles = projects_manager.list_project_files(user_id_val, slug)
+                                    resp_data = {"files": pfiles}
+                                    await broadcast_project_log(slug, f"[TOOL] Live AI listed files: {', '.join(pfiles[:5])}", "tool")
+                                except Exception as err:
+                                    resp_data = {"error": str(err), "files": []}
+                                    await broadcast_project_log(slug, f"[TOOL_ERROR] list_project_files failed: {err}", "error")
                                 try:
                                     await session.send_tool_response(
                                         function_responses=[
-                                            types.FunctionResponse(name=fc.name, id=fc.id, response={"files": pfiles})
+                                            types.FunctionResponse(name=fc.name, id=call_id, response=resp_data)
                                         ]
                                     )
                                 except Exception as e:
                                     print(f"[LIVE TOOL SEND ERROR] {e}")
 
                             elif fc.name == "read_project_file":
-                                user_id_val = int(session_user.get("id") or session_user.get("user_id", 0))
-                                fpath = fc.args.get("path", "").strip()
-                                fcontent = projects_manager.read_project_file(user_id_val, slug, fpath)
-                                await broadcast_project_log(slug, f"[TOOL] Live AI read file '{fpath}' ({len(fcontent)} chars)", "tool")
+                                fpath = str(args.get("path", "") or args.get("file", "") or args.get("filename", "")).strip()
+                                try:
+                                    user_id_val = int(session_user.get("id") or session_user.get("user_id", 0))
+                                    if not fpath:
+                                        resp_data = {"error": "Missing required file path parameter", "content": ""}
+                                    else:
+                                        fcontent = projects_manager.read_project_file(user_id_val, slug, fpath)
+                                        resp_data = {"path": fpath, "content": fcontent[:4000]}
+                                        await broadcast_project_log(slug, f"[TOOL] Live AI read file '{fpath}' ({len(fcontent)} chars)", "tool")
+                                except Exception as err:
+                                    resp_data = {"path": fpath, "error": f"Could not read '{fpath}': {str(err)}", "content": ""}
+                                    await broadcast_project_log(slug, f"[TOOL_ERROR] read_project_file '{fpath}' failed: {err}", "error")
                                 try:
                                     await session.send_tool_response(
                                         function_responses=[
-                                            types.FunctionResponse(name=fc.name, id=fc.id, response={"path": fpath, "content": fcontent[:4000]})
+                                            types.FunctionResponse(name=fc.name, id=call_id, response=resp_data)
                                         ]
                                     )
                                 except Exception as e:
                                     print(f"[LIVE TOOL SEND ERROR] {e}")
 
                             elif fc.name == "search_project":
-                                user_id_val = int(session_user.get("id") or session_user.get("user_id", 0))
-                                query_str = fc.args.get("query", "").strip()
-                                search_matches = projects_manager.search_project_files(user_id_val, slug, query_str)
-                                await broadcast_project_log(slug, f"[TOOL] Live AI searched for '{query_str}' -> {len(search_matches)} matches", "tool")
+                                query_str = str(args.get("query", "") or args.get("search", "") or args.get("term", "")).strip()
+                                try:
+                                    user_id_val = int(session_user.get("id") or session_user.get("user_id", 0))
+                                    search_matches = projects_manager.search_project_files(user_id_val, slug, query_str)
+                                    resp_data = {"query": query_str, "matches": search_matches}
+                                    await broadcast_project_log(slug, f"[TOOL] Live AI searched for '{query_str}' -> {len(search_matches)} matches", "tool")
+                                except Exception as err:
+                                    resp_data = {"query": query_str, "error": str(err), "matches": []}
+                                    await broadcast_project_log(slug, f"[TOOL_ERROR] search_project '{query_str}' failed: {err}", "error")
                                 try:
                                     await session.send_tool_response(
                                         function_responses=[
-                                            types.FunctionResponse(name=fc.name, id=fc.id, response={"query": query_str, "matches": search_matches})
+                                            types.FunctionResponse(name=fc.name, id=call_id, response=resp_data)
                                         ]
                                     )
                                 except Exception as e:
                                     print(f"[LIVE TOOL SEND ERROR] {e}")
 
                             elif fc.name == "get_current_build":
-                                user_id_val = int(session_user.get("id") or session_user.get("user_id", 0))
-                                build_logs = projects_manager.read_build_log(user_id_val, slug, max_lines=15)
-                                await broadcast_project_log(slug, f"[TOOL] Live AI retrieved recent build logs ({len(build_logs)} entries)", "tool")
+                                try:
+                                    user_id_val = int(session_user.get("id") or session_user.get("user_id", 0))
+                                    build_logs = projects_manager.read_build_log(user_id_val, slug, max_lines=15)
+                                    resp_data = {"build_logs": build_logs}
+                                    await broadcast_project_log(slug, f"[TOOL] Live AI retrieved recent build logs ({len(build_logs)} entries)", "tool")
+                                except Exception as err:
+                                    resp_data = {"error": str(err), "build_logs": []}
+                                    await broadcast_project_log(slug, f"[TOOL_ERROR] get_current_build failed: {err}", "error")
                                 try:
                                     await session.send_tool_response(
                                         function_responses=[
-                                            types.FunctionResponse(name=fc.name, id=fc.id, response={"build_logs": build_logs})
+                                            types.FunctionResponse(name=fc.name, id=call_id, response=resp_data)
                                         ]
                                     )
                                 except Exception as e:
                                     print(f"[LIVE TOOL SEND ERROR] {e}")
 
                             elif fc.name == "get_known_bugs":
-                                user_id_val = int(session_user.get("id") or session_user.get("user_id", 0))
-                                manifest = projects_manager.get_project_manifest(user_id_val, slug)
-                                bugs = manifest.get("known_bugs", [])
-                                await broadcast_project_log(slug, f"[TOOL] Live AI retrieved known bugs: {len(bugs)} found", "tool")
+                                try:
+                                    user_id_val = int(session_user.get("id") or session_user.get("user_id", 0))
+                                    manifest = projects_manager.get_project_manifest(user_id_val, slug)
+                                    bugs = manifest.get("known_bugs", [])
+                                    resp_data = {"known_bugs": bugs}
+                                    await broadcast_project_log(slug, f"[TOOL] Live AI retrieved known bugs: {len(bugs)} found", "tool")
+                                except Exception as err:
+                                    resp_data = {"error": str(err), "known_bugs": []}
+                                    await broadcast_project_log(slug, f"[TOOL_ERROR] get_known_bugs failed: {err}", "error")
                                 try:
                                     await session.send_tool_response(
                                         function_responses=[
-                                            types.FunctionResponse(name=fc.name, id=fc.id, response={"known_bugs": bugs})
+                                            types.FunctionResponse(name=fc.name, id=call_id, response=resp_data)
                                         ]
                                     )
                                 except Exception as e:
                                     print(f"[LIVE TOOL SEND ERROR] {e}")
 
                             elif fc.name == "validate_project":
-                                user_id_val = int(session_user.get("id") or session_user.get("user_id", 0))
-                                val_report = projects_manager.validate_project(user_id_val, slug)
-                                await broadcast_project_log(slug, f"[TOOL] Live AI validated project: valid={val_report.get('valid')}, {len(val_report.get('errors', []))} errors", "tool")
+                                try:
+                                    user_id_val = int(session_user.get("id") or session_user.get("user_id", 0))
+                                    val_report = projects_manager.validate_project(user_id_val, slug)
+                                    resp_data = val_report
+                                    await broadcast_project_log(slug, f"[TOOL] Live AI validated project: valid={val_report.get('valid')}, {len(val_report.get('errors', []))} errors", "tool")
+                                except Exception as err:
+                                    resp_data = {"valid": False, "errors": [str(err)]}
+                                    await broadcast_project_log(slug, f"[TOOL_ERROR] validate_project failed: {err}", "error")
                                 try:
                                     await session.send_tool_response(
                                         function_responses=[
-                                            types.FunctionResponse(name=fc.name, id=fc.id, response=val_report)
+                                            types.FunctionResponse(name=fc.name, id=call_id, response=resp_data)
                                         ]
                                     )
                                 except Exception as e:
                                     print(f"[LIVE TOOL SEND ERROR] {e}")
 
                             elif fc.name == "save_design_decision":
-                                user_id_val = int(session_user.get("id") or session_user.get("user_id", 0))
-                                decision_str = fc.args.get("decision", "").strip()
-                                if decision_str:
-                                    projects_manager.update_project_manifest(user_id_val, slug, {"design_decisions": [decision_str]})
-                                await broadcast_project_log(slug, f"[TOOL] Live AI saved design decision: \"{decision_str[:60]}...\"", "tool")
+                                decision_str = str(args.get("decision", "")).strip()
+                                try:
+                                    user_id_val = int(session_user.get("id") or session_user.get("user_id", 0))
+                                    if decision_str:
+                                        projects_manager.update_project_manifest(user_id_val, slug, {"design_decisions": [decision_str]})
+                                    resp_data = {"status": "saved", "decision": decision_str}
+                                    await broadcast_project_log(slug, f"[TOOL] Live AI saved design decision: \"{decision_str[:60]}...\"", "tool")
+                                except Exception as err:
+                                    resp_data = {"error": str(err), "status": "failed"}
+                                    await broadcast_project_log(slug, f"[TOOL_ERROR] save_design_decision failed: {err}", "error")
                                 try:
                                     await session.send_tool_response(
                                         function_responses=[
-                                            types.FunctionResponse(name=fc.name, id=fc.id, response={"status": "saved", "decision": decision_str})
+                                            types.FunctionResponse(name=fc.name, id=call_id, response=resp_data)
                                         ]
                                     )
                                 except Exception as e:
                                     print(f"[LIVE TOOL SEND ERROR] {e}")
 
                             elif fc.name == "remember_creator_preference":
-                                user_id_val = int(session_user.get("id") or session_user.get("user_id", 0))
-                                pref_str = fc.args.get("preference", "").strip()
-                                if pref_str:
-                                    projects_manager.update_project_manifest(user_id_val, slug, {"creator_preferences": [pref_str]})
-                                await broadcast_project_log(slug, f"[TOOL] Live AI remembered preference: \"{pref_str[:60]}...\"", "tool")
+                                pref_str = str(args.get("preference", "")).strip()
+                                try:
+                                    user_id_val = int(session_user.get("id") or session_user.get("user_id", 0))
+                                    if pref_str:
+                                        projects_manager.update_project_manifest(user_id_val, slug, {"creator_preferences": [pref_str]})
+                                    resp_data = {"status": "remembered", "preference": pref_str}
+                                    await broadcast_project_log(slug, f"[TOOL] Live AI remembered preference: \"{pref_str[:60]}...\"", "tool")
+                                except Exception as err:
+                                    resp_data = {"error": str(err), "status": "failed"}
+                                    await broadcast_project_log(slug, f"[TOOL_ERROR] remember_creator_preference failed: {err}", "error")
                                 try:
                                     await session.send_tool_response(
                                         function_responses=[
-                                            types.FunctionResponse(name=fc.name, id=fc.id, response={"status": "remembered", "preference": pref_str})
+                                            types.FunctionResponse(name=fc.name, id=call_id, response=resp_data)
                                         ]
                                     )
                                 except Exception as e:
                                     print(f"[LIVE TOOL SEND ERROR] {e}")
+
+                            else:
+                                # Unknown tool call fallback - acknowledge cleanly so session does not hang
+                                try:
+                                    await session.send_tool_response(
+                                        function_responses=[
+                                            types.FunctionResponse(name=fc.name, id=call_id, response={"result": "Tool acknowledged"})
+                                        ]
+                                    )
+                                except Exception as e:
+                                    print(f"[LIVE UNKNOWN TOOL ERROR] {e}")
             except asyncio.CancelledError:
                 break
             except Exception as turn_err:
@@ -1587,6 +1670,7 @@ async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
                         continue
 
                     elif msg_type == "connect_live":
+                        preferred_live_model = data.get("model")
                         if not session_user:
                             if not ws.closed:
                                 await ws.send_json({
@@ -1594,7 +1678,12 @@ async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
                                     "message": "Authentication required. Please sign in to connect Gemini Live."
                                 })
                         else:
-                            await start_gemini_live_session(ws, slug, session_user)
+                            await start_gemini_live_session(ws, slug, session_user, preferred_model=preferred_live_model)
+
+                    elif msg_type == "switch_live_model":
+                        preferred_live_model = data.get("model")
+                        if session_user:
+                            await start_gemini_live_session(ws, slug, session_user, preferred_model=preferred_live_model)
 
                     elif msg_type == "disconnect_live":
                         await stop_gemini_live_session(ws)
@@ -1644,6 +1733,7 @@ async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
                         
                     elif msg_type == "command":
                         prompt = data.get("prompt", "").strip()
+                        code_model = data.get("model")
                         if prompt and session_user:
                             # Audit Point 13: Centralized build rate limiting
                             allowed, wait_sec = check_rate_limit("build", str(session_user["id"]), *config.RATE_LIMIT_MODIFY)
@@ -1681,7 +1771,7 @@ async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
                                         )
                                     except Exception:
                                         pass
-                                asyncio.create_task(_run_antigravity_builder(slug, session_user, api_key, prompt, ws, live_sess))
+                                asyncio.create_task(_run_antigravity_builder(slug, session_user, api_key, prompt, ws, live_sess, preferred_model=code_model))
                                     
                     elif msg_type == "video_frame":
                         # Audit Point 15: Server-side frame size and rate controls

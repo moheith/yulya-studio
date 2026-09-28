@@ -174,6 +174,142 @@
       color: #fff;
     }
 
+    /* Model Dropdown & Clickable Pill Styles */
+    .status-pill.clickable {
+      cursor: pointer;
+      transition: var(--transition-fast);
+    }
+    .status-pill.clickable:hover {
+      border-color: rgba(139, 92, 246, 0.6);
+      background: rgba(139, 92, 246, 0.18);
+    }
+    .pill-chevron {
+      font-size: 8.5px;
+      opacity: 0.65;
+      margin-left: 2px;
+      transition: transform 0.2s ease;
+    }
+    .model-selector-wrapper {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+    }
+    .model-dropdown-menu {
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0;
+      min-width: 280px;
+      background: var(--bg-overlay);
+      border: 1px solid var(--border-active);
+      border-radius: var(--radius-md);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7), 0 0 15px rgba(139, 92, 246, 0.15);
+      z-index: 1000;
+      display: none;
+      flex-direction: column;
+      overflow: hidden;
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+    }
+    .model-dropdown-menu.open {
+      display: flex;
+      animation: menuFadeIn 0.15s ease-out;
+    }
+    @keyframes menuFadeIn {
+      from { opacity: 0; transform: translateY(-4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .dropdown-header {
+      padding: 8px 12px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: var(--text-tertiary);
+      border-bottom: 1px solid var(--border-subtle);
+      background: rgba(15, 7, 36, 0.5);
+    }
+    .model-option {
+      padding: 9px 12px;
+      cursor: pointer;
+      transition: background 0.12s ease, border-left-color 0.12s ease;
+      border-left: 3px solid transparent;
+      border-bottom: 1px solid rgba(120, 80, 160, 0.08);
+      user-select: none;
+    }
+    .model-option:last-child {
+      border-bottom: none;
+    }
+    .model-option:hover {
+      background: rgba(139, 92, 246, 0.14);
+      border-left-color: var(--accent-primary);
+    }
+    .model-option.selected {
+      background: rgba(139, 92, 246, 0.2);
+      border-left-color: var(--accent-primary);
+    }
+    .model-opt-title {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .model-opt-desc {
+      font-size: 11px;
+      color: var(--text-tertiary);
+      margin-top: 2px;
+      line-height: 1.35;
+    }
+    .badge-rec {
+      font-size: 9px;
+      background: rgba(56, 189, 248, 0.2);
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      color: #38bdf8;
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+    }
+
+    /* Antigravity Toolbar inside Antigravity View */
+    .antigravity-toolbar {
+      height: 38px;
+      padding: 0 var(--space-3);
+      background: var(--bg-elevated);
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+      gap: var(--space-2);
+    }
+    .antigravity-brand {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-primary);
+      letter-spacing: 0.4px;
+    }
+    .antigravity-brand svg {
+      color: #a855f7;
+    }
+    .status-pill.code-model-pill {
+      border-color: rgba(56, 189, 248, 0.35);
+      background: rgba(56, 189, 248, 0.08);
+      color: #93c5fd;
+      font-size: 11.5px;
+      font-family: var(--font-code);
+      font-weight: 600;
+    }
+    .status-pill.code-model-pill:hover {
+      border-color: #38bdf8;
+      background: rgba(56, 189, 248, 0.18);
+    }
+
     /* Dual Pane Workspace & Resizable Splitter */
     .workspace-split {
       flex: 1;
@@ -836,10 +972,28 @@
     </div>
 
     <div class="header-center">
-      <!-- Gemini 3.8 Live Extended Thinking Pill -->
-      <div class="status-pill live-ai-pill" id="liveAiPill">
-        <span id="liveStatusDot" class="status-dot offline"></span>
-        <span id="liveStatusText">Gemini 3.8 Live (Offline)</span>
+      <!-- Gemini Voice Model Selector Dropdown -->
+      <div class="model-selector-wrapper">
+        <div class="status-pill live-ai-pill clickable" id="liveAiPill" onclick="toggleVoiceModelMenu(event)" title="Click to choose Gemini Voice Model">
+          <span id="liveStatusDot" class="status-dot offline"></span>
+          <span id="liveStatusText">Gemini 3.8 Live</span>
+          <span class="pill-chevron" id="voicePillChevron">▼</span>
+        </div>
+        <div class="model-dropdown-menu" id="voiceModelMenu">
+          <div class="dropdown-header">Gemini Voice Model</div>
+          <div class="model-option selected" data-model="gemini-3.8-live" onclick="selectVoiceModel('gemini-3.8-live', 'Gemini 3.8 Live — Standard')">
+            <div class="model-opt-title">Gemini 3.8 Live <span class="badge-rec">Recommended</span></div>
+            <div class="model-opt-desc">Instant & reliable tools, audio, low latency</div>
+          </div>
+          <div class="model-option" data-model="gemini-3.8-live-extended-thinking" onclick="selectVoiceModel('gemini-3.8-live-extended-thinking', 'Gemini 3.8 Live Extended Thinking — HIGH')">
+            <div class="model-opt-title">Gemini 3.8 Live Extended Thinking</div>
+            <div class="model-opt-desc">Deep reasoning (HIGH) with non-blocking tools</div>
+          </div>
+          <div class="model-option" data-model="gemini-3.1-flash-live-preview" onclick="selectVoiceModel('gemini-3.1-flash-live-preview', 'Gemini 3.1 Live Preview')">
+            <div class="model-opt-title">Gemini 3.1 Live Preview</div>
+            <div class="model-opt-desc">Fast low-latency preview fallback</div>
+          </div>
+        </div>
       </div>
 
 
@@ -925,6 +1079,50 @@
 
       <!-- Antigravity Engine View -->
       <div class="antigravity-view" id="antigravityView">
+        <div class="antigravity-toolbar">
+          <div class="antigravity-brand">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            <span>Antigravity Engine</span>
+          </div>
+          <div class="model-selector-wrapper">
+            <div class="status-pill code-model-pill clickable" id="antigravityModelPill" onclick="toggleAntigravityModelMenu(event)" title="Click to choose Antigravity Code Model">
+              <span class="status-dot online"></span>
+              <span id="antigravityModelText">Gemini 3.8 Flash</span>
+              <span class="pill-chevron" id="antigravityPillChevron">▼</span>
+            </div>
+            <div class="model-dropdown-menu" id="antigravityModelMenu">
+              <div class="dropdown-header">Antigravity Code Model</div>
+              <div class="model-option selected" data-model="gemini-3.8-flash" onclick="selectAntigravityModel('gemini-3.8-flash', 'Gemini 3.8 Flash')">
+                <div class="model-opt-title">Gemini 3.8 Flash <span class="badge-rec">Default</span></div>
+                <div class="model-opt-desc">Fast, powerful 2026 flagship code generation</div>
+              </div>
+              <div class="model-option" data-model="gemini-3.7-flash" onclick="selectAntigravityModel('gemini-3.7-flash', 'Gemini 3.7 Flash')">
+                <div class="model-opt-title">Gemini 3.7 Flash</div>
+                <div class="model-opt-desc">Hybrid reasoning code & architecture model</div>
+              </div>
+              <div class="model-option" data-model="gemini-3.6-flash" onclick="selectAntigravityModel('gemini-3.6-flash', 'Gemini 3.6 Flash')">
+                <div class="model-opt-title">Gemini 3.6 Flash</div>
+                <div class="model-opt-desc">Stable high-speed code generation</div>
+              </div>
+              <div class="model-option" data-model="gemini-3.5-flash" onclick="selectAntigravityModel('gemini-3.5-flash', 'Gemini 3.5 Flash')">
+                <div class="model-opt-title">Gemini 3.5 Flash</div>
+                <div class="model-opt-desc">Standard balanced multimodal model</div>
+              </div>
+              <div class="model-option" data-model="gemini-3.1-flash-lite" onclick="selectAntigravityModel('gemini-3.1-flash-lite', 'Gemini 3.1 Flash Lite')">
+                <div class="model-opt-title">Gemini 3.1 Flash Lite</div>
+                <div class="model-opt-desc">Ultra-light, high-throughput model</div>
+              </div>
+              <div class="model-option" data-model="gemini-3.5-flash-lite" onclick="selectAntigravityModel('gemini-3.5-flash-lite', 'Gemini 3.5 Flash Lite')">
+                <div class="model-opt-title">Gemini 3.5 Flash Lite</div>
+                <div class="model-opt-desc">Lightweight low-latency fallback</div>
+              </div>
+              <div class="model-option" data-model="gemini-2.5-flash" onclick="selectAntigravityModel('gemini-2.5-flash', 'Gemini 2.5 Flash')">
+                <div class="model-opt-title">Gemini 2.5 Flash</div>
+                <div class="model-opt-desc">Legacy emergency backup model</div>
+              </div>
+            </div>
+          </div>
+        </div>
         <div class="terminal-feed" id="antigravityFeed">
           <div class="log-line">
             <span class="log-time">00:00:00</span>
@@ -1256,6 +1454,123 @@
     let speechRecognizer = null;
     let currentSpeechTranscript = '';
     let isSpeechRecognitionActive = false;
+
+    // Model Selection State & Dropdowns
+    let selectedVoiceModel = localStorage.getItem('yulya_preferred_voice_model') || 'gemini-3.8-live';
+    let selectedAntigravityModel = localStorage.getItem('yulya_preferred_code_model') || 'gemini-3.8-flash';
+
+    function formatModelName(modelId) {
+      const names = {
+        'gemini-3.8-flash': 'Gemini 3.8 Flash',
+        'gemini-3.7-flash': 'Gemini 3.7 Flash',
+        'gemini-3.6-flash': 'Gemini 3.6 Flash',
+        'gemini-3.5-flash': 'Gemini 3.5 Flash',
+        'gemini-3.1-flash-lite': 'Gemini 3.1 Flash Lite',
+        'gemini-3.5-flash-lite': 'Gemini 3.5 Flash Lite',
+        'gemini-2.5-flash': 'Gemini 2.5 Flash'
+      };
+      return names[modelId] || modelId;
+    }
+
+    function formatVoiceModelName(modelId) {
+      const names = {
+        'gemini-3.8-live': 'Gemini 3.8 Live',
+        'gemini-3.8-live-extended-thinking': 'Gemini 3.8 Live Extended Thinking',
+        'gemini-3.1-flash-live-preview': 'Gemini 3.1 Live Preview'
+      };
+      return names[modelId] || 'Gemini Live';
+    }
+
+    function toggleVoiceModelMenu(e) {
+      if (e) e.stopPropagation();
+      const menu = document.getElementById('voiceModelMenu');
+      const agyMenu = document.getElementById('antigravityModelMenu');
+      if (agyMenu) agyMenu.classList.remove('open');
+      if (menu) menu.classList.toggle('open');
+    }
+
+    function toggleAntigravityModelMenu(e) {
+      if (e) e.stopPropagation();
+      const menu = document.getElementById('antigravityModelMenu');
+      const voiceMenu = document.getElementById('voiceModelMenu');
+      if (voiceMenu) voiceMenu.classList.remove('open');
+      if (menu) menu.classList.toggle('open');
+    }
+
+    document.addEventListener('click', () => {
+      const voiceMenu = document.getElementById('voiceModelMenu');
+      if (voiceMenu) voiceMenu.classList.remove('open');
+      const agyMenu = document.getElementById('antigravityModelMenu');
+      if (agyMenu) agyMenu.classList.remove('open');
+    });
+
+    function selectVoiceModel(modelId, label) {
+      selectedVoiceModel = modelId;
+      localStorage.setItem('yulya_preferred_voice_model', modelId);
+
+      const menu = document.getElementById('voiceModelMenu');
+      if (menu) {
+        menu.classList.remove('open');
+        menu.querySelectorAll('.model-option').forEach(opt => {
+          if (opt.getAttribute('data-model') === modelId) opt.classList.add('selected');
+          else opt.classList.remove('selected');
+        });
+      }
+
+      if (isLiveConnected) {
+        ToastManager.show(`Switching voice to ${label}...`, 'info');
+        logTerminal(`[LIVE_AI] Switching model to ${label}...`, 'thinking');
+        setLiveStatus(`Switching to ${label}...`, 'connecting');
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'switch_live_model', model: modelId }));
+        }
+      } else {
+        setLiveStatus(label, 'offline');
+        ToastManager.show(`Voice model set to ${label}`, 'info');
+      }
+    }
+
+    function selectAntigravityModel(modelId, label) {
+      selectedAntigravityModel = modelId;
+      localStorage.setItem('yulya_preferred_code_model', modelId);
+
+      const menu = document.getElementById('antigravityModelMenu');
+      if (menu) {
+        menu.classList.remove('open');
+        menu.querySelectorAll('.model-option').forEach(opt => {
+          if (opt.getAttribute('data-model') === modelId) opt.classList.add('selected');
+          else opt.classList.remove('selected');
+        });
+      }
+
+      const labelEl = document.getElementById('antigravityModelText');
+      if (labelEl) labelEl.textContent = label;
+
+      logAntigravity(`[ARCHITECT] Selected coding model: ${label}`, 'architect');
+      ToastManager.show(`Antigravity model set to ${label}`, 'success');
+    }
+
+    // Initialize model pills from storage on script evaluation
+    setTimeout(() => {
+      const agyText = document.getElementById('antigravityModelText');
+      if (agyText) {
+        agyText.textContent = formatModelName(selectedAntigravityModel);
+      }
+      const agyMenu = document.getElementById('antigravityModelMenu');
+      if (agyMenu) {
+        agyMenu.querySelectorAll('.model-option').forEach(opt => {
+          if (opt.getAttribute('data-model') === selectedAntigravityModel) opt.classList.add('selected');
+          else opt.classList.remove('selected');
+        });
+      }
+      const vMenu = document.getElementById('voiceModelMenu');
+      if (vMenu) {
+        vMenu.querySelectorAll('.model-option').forEach(opt => {
+          if (opt.getAttribute('data-model') === selectedVoiceModel) opt.classList.add('selected');
+          else opt.classList.remove('selected');
+        });
+      }
+    }, 50);
 
     // --- Draggable Split Resizer & Preset Handlers ---
     function initSplitResizer() {
@@ -1985,41 +2300,56 @@
               if (data.status === 'connected') {
                 isLiveConnected = true;
                 updateLiveButton(true);
+                const connectedModelName = data.model || 'Gemini Live';
+                if (data.model_id) {
+                  selectedVoiceModel = data.model_id;
+                  const vMenu = document.getElementById('voiceModelMenu');
+                  if (vMenu) {
+                    vMenu.querySelectorAll('.model-option').forEach(opt => {
+                      if (opt.getAttribute('data-model') === data.model_id) opt.classList.add('selected');
+                      else opt.classList.remove('selected');
+                    });
+                  }
+                }
                 if (voiceMode === 'continuous') {
                   isListening = true;
                   setLiveStatus('Continuous Voice Active', 'listening');
                   animateWaveform('listening');
-                  logTerminal(`[LIVE_AI] Connected to ${data.model || 'Gemini 3.8 Live Extended Thinking (High)'}. Continuous voice active.`, 'live');
+                  logTerminal(`[LIVE_AI] Connected to ${connectedModelName}. Continuous voice active.`, 'live');
                 } else {
-                  setLiveStatus(data.model || 'Gemini 3.8 Live Ready', 'online');
-                  logTerminal(`[LIVE_AI] Connected to ${data.model || 'Gemini 3.8 Live Extended Thinking (High)'}. Hold Space to talk.`, 'live');
+                  setLiveStatus(connectedModelName, 'online');
+                  logTerminal(`[LIVE_AI] Connected to ${connectedModelName}. Hold Space to talk.`, 'live');
                 }
-                ToastManager.show('Gemini 3.8 Live Connected', 'success');
+                ToastManager.show(`${connectedModelName} Connected`, 'success');
               } else if (data.status === 'connecting') {
-                setLiveStatus(data.message || 'Connecting to Gemini 3.8 Live...', 'connecting');
+                setLiveStatus(data.message || 'Connecting to Gemini Live...', 'connecting');
                 updateLiveButton(false, true);
               } else if (data.status === 'thinking') {
                 setLiveStatus('Extended Thinking (High)...', 'thinking');
               } else if (data.status === 'disconnected') {
                 isLiveConnected = false;
-                setLiveStatus('Gemini 3.8 Live (Offline)', 'offline');
+                setLiveStatus(formatVoiceModelName(selectedVoiceModel) + ' (Offline)', 'offline');
                 updateLiveButton(false);
-                logTerminal('[LIVE_AI] Disconnected from Gemini 3.8 Live', 'info');
+                logTerminal('[LIVE_AI] Disconnected from Gemini Live', 'info');
               }
             } else if (data.type === 'live_error') {
               logTerminal(`[LIVE_ERROR] ${data.message}`, 'error');
               ToastManager.show(data.message, 'error');
-              setLiveStatus('Gemini 3.8 Live Error', 'offline');
+              setLiveStatus('Gemini Live Error', 'offline');
               updateLiveButton(false);
             } else if (data.type === 'interaction_status') {
               if (data.status && data.status.toUpperCase().includes('IN_PROGRESS')) {
                 setLiveStatus('Extended Thinking (High)...', 'thinking');
               } else if (data.status && data.status.toUpperCase().includes('IDLE')) {
-                setLiveStatus(voiceMode === 'continuous' ? 'Continuous Voice Active' : 'Gemini 3.8 Live Ready', voiceMode === 'continuous' ? 'listening' : 'online');
+                setLiveStatus(voiceMode === 'continuous' ? 'Continuous Voice Active' : (formatVoiceModelName(selectedVoiceModel) + ' Ready'), voiceMode === 'continuous' ? 'listening' : 'online');
               }
             } else if (data.type === 'code_update') {
               hideAntigravityLoader();
               logAntigravity(`[PASS] ${data.summary}`, 'pass');
+              if (data.model_used) {
+                const labelEl = document.getElementById('antigravityModelText');
+                if (labelEl) labelEl.textContent = formatModelName(data.model_used);
+              }
               if (data.content) {
                 fileContents = data.content;
                 renderFileTabs();
@@ -2108,15 +2438,16 @@
         liveAudioPlayer.stop();
         stopMicrophone();
         isLiveConnected = false;
-        setLiveStatus('Gemini 3.8 Live (Offline)', 'offline');
+        setLiveStatus(formatVoiceModelName(selectedVoiceModel) + ' (Offline)', 'offline');
         updateLiveButton(false);
-        logTerminal('[LIVE_AI] Disconnected from Gemini 3.8 Live', 'info');
+        logTerminal('[LIVE_AI] Disconnected from Gemini Live', 'info');
         ToastManager.show('Live AI Disconnected', 'info');
       } else {
-        setLiveStatus('Connecting to Gemini 3.8 Live...', 'connecting');
+        const targetModelName = formatVoiceModelName(selectedVoiceModel);
+        setLiveStatus(`Connecting to ${targetModelName}...`, 'connecting');
         updateLiveButton(false, true);
-        logTerminal('[LIVE] Connecting to Gemini 3.8 Live Extended Thinking (High)...', 'thinking');
-        ws.send(JSON.stringify({ type: 'connect_live' }));
+        logTerminal(`[LIVE] Connecting to ${targetModelName}...`, 'thinking');
+        ws.send(JSON.stringify({ type: 'connect_live', model: selectedVoiceModel }));
         liveAudioPlayer.init();
         startMicrophone().then(ok => {
           if (ok && voiceMode === 'continuous') {
@@ -2482,10 +2813,14 @@
         const res = await fetch('/api/modify-project', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ slug: ACTIVE_SLUG, prompt: prompt })
+          body: JSON.stringify({ slug: ACTIVE_SLUG, prompt: prompt, model: selectedAntigravityModel })
         });
         const data = await res.json();
         hideAntigravityLoader();
+        if (data.model_used) {
+          const labelEl = document.getElementById('antigravityModelText');
+          if (labelEl) labelEl.textContent = formatModelName(data.model_used);
+        }
         if (!data.success) {
           logAntigravity(`Error: ${data.error}`, 'error');
           ToastManager.show(data.error || 'Failed to modify game', 'error');
