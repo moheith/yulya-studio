@@ -5,9 +5,24 @@ import os
 import sys
 import asyncio
 import io
+import json
+import base64
 import zipfile
 from pathlib import Path
+import pathlib
 from unittest.mock import MagicMock, AsyncMock
+
+# Ensure pathlib._NormalAccessor.mkdir works reliably across wrapped os.mkdir environments
+if hasattr(pathlib, "_NormalAccessor") and hasattr(pathlib._NormalAccessor, "mkdir"):
+    _orig_mkdir = os.mkdir
+    class _CallableWrapper:
+        def __init__(self, func):
+            self.func = func
+        def __call__(self, *args, **kwargs):
+            return self.func(*args, **kwargs)
+        def __get__(self, instance, owner=None):
+            return self.func
+    pathlib._NormalAccessor.mkdir = _CallableWrapper(_orig_mkdir)
 
 import config
 import database
@@ -726,11 +741,135 @@ async def run_tests():
         studio_html_content = Path("templates/studio.html").read_text(encoding="utf-8")
         assert_true("1920" in studio_html_content and "1080" in studio_html_content, "Screenshare configured for 1080p in studio.html")
         assert_true("500" in studio_html_content, "Screenshare interval configured for 500ms (2 FPS) in studio.html")
+        assert_true("initial_frame" in studio_html_content, "Screenshare passes initial_frame with screenshare_status in studio.html")
+        assert_true("handleTranscriptDelta" in studio_html_content, "Studio.html includes turn-aware delta transcript handler")
+        assert_true("loadRegistryModels" in studio_html_content, "Studio.html dynamically loads authoritative model registry")
         
         # Cleanup
         projects_manager.delete_project_dir(v2_user, v2_slug)
     except Exception as e:
         assert_true(False, f"V2 autonomous agent test failed: {e}")
+
+    # 11. Testing Centralized Model Registry, Live Session State Machine & Vision Subsystems
+    print("\n11. Testing Centralized Model Registry, Live Session State Machine & Subsystems...")
+    try:
+        import base64
+        import models_registry
+        from live_session import (
+            LiveState,
+            FailureClass,
+            classify_failure,
+            is_fallback_eligible,
+            LiveSessionContext,
+            safe_execute_tool,
+            ScreenshareSubsystem
+        )
+
+        # 11.1 Model Registry Tests
+        live_models = models_registry.get_live_models()
+        code_models = models_registry.get_code_models()
+        assert_true(len(live_models) == 3, f"Model registry has 3 Live models: {[m.id for m in live_models]}")
+        assert_true(len(code_models) >= 5, f"Model registry has >=5 Code models: {[m.id for m in code_models]}")
+        assert_true(models_registry.DEFAULT_LIVE_MODEL_ID == "gemini-3.8-live", "Default live model is gemini-3.8-live")
+        assert_true(models_registry.DEFAULT_CODE_MODEL_ID == "gemini-3.8-flash", "Default code model is gemini-3.8-flash")
+        assert_true(models_registry.validate_live_model("gemini-3.8-live") is True, "gemini-3.8-live is valid live model")
+        assert_true(models_registry.validate_live_model("gemini-3.8-live-extended-thinking") is True, "gemini-3.8-live-extended-thinking is valid")
+        assert_true(models_registry.validate_live_model("gemini-1.5-flash") is False, "Invalid model rejected by validate_live_model")
+        assert_true(models_registry.validate_code_model("gemini-3.8-flash") is True, "gemini-3.8-flash is valid code model")
+        assert_true(models_registry.validate_code_model("invalid-code-model") is False, "Invalid model rejected by validate_code_model")
+
+        # Fallback candidates
+        live_fallbacks = models_registry.get_live_fallback_candidates("gemini-3.8-live-extended-thinking")
+        assert_true(len(live_fallbacks) >= 2, f"Fallback candidates returned for extended-thinking: {[m.id for m in live_fallbacks]}")
+        assert_true(live_fallbacks[0].id == "gemini-3.8-live-extended-thinking", "Requested model is first candidate")
+        code_fallbacks = models_registry.get_code_fallback_candidates("gemini-3.8-flash")
+        assert_true(len(code_fallbacks) >= 3, f"Fallback candidates returned for code model: {[m.id for m in code_fallbacks]}")
+
+        # Summary
+        summary = models_registry.get_registry_summary()
+        assert_true("live_models" in summary and "code_models" in summary, "Registry summary contains live_models and code_models")
+
+        # 11.2 Failure Classification Tests
+        assert_true(classify_failure(Exception("API_KEY_INVALID: Unauthorized key")) == FailureClass.AUTH, "AUTH error classified")
+        assert_true(classify_failure(Exception("ResourceExhausted: 429 Quota limit")) == FailureClass.QUOTA, "QUOTA error classified")
+        assert_true(classify_failure(asyncio.TimeoutError()) == FailureClass.TIMEOUT, "TIMEOUT error classified")
+        assert_true(classify_failure(Exception("Model gemini-3.8-live-extended-thinking not found")) == FailureClass.MODEL_UNAVAILABLE, "MODEL_UNAVAILABLE classified")
+        assert_true(classify_failure(Exception("Connection reset by peer")) == FailureClass.TRANSIENT_TRANSPORT, "TRANSIENT_TRANSPORT classified")
+        assert_true(classify_failure(asyncio.CancelledError()) == FailureClass.USER_INTERRUPTION, "USER_INTERRUPTION classified")
+
+        # Fallback eligibility
+        assert_true(is_fallback_eligible(FailureClass.QUOTA) is True, "QUOTA is eligible for fallback")
+        assert_true(is_fallback_eligible(FailureClass.MODEL_UNAVAILABLE) is True, "MODEL_UNAVAILABLE is eligible for fallback")
+        assert_true(is_fallback_eligible(FailureClass.TRANSIENT_TRANSPORT) is True, "TRANSIENT_TRANSPORT is eligible for fallback")
+        assert_true(is_fallback_eligible(FailureClass.AUTH) is False, "AUTH is strictly NOT eligible for fallback")
+        assert_true(is_fallback_eligible(FailureClass.USER_INTERRUPTION) is False, "USER_INTERRUPTION is NOT eligible for fallback")
+        assert_true(is_fallback_eligible(FailureClass.INVALID_REQUEST) is False, "INVALID_REQUEST is NOT eligible for fallback")
+
+        # 11.3 Screenshare Subsystem Tests
+        ss = ScreenshareSubsystem()
+        assert_true(ss.active is False, "Screenshare initially inactive")
+        assert_true(ss.validate_and_record_frame("") is None, "Empty frame rejected")
+        assert_true(ss.frames_dropped == 1, "Frames dropped counter incremented on empty frame")
+
+        # Reject non-JPEG data
+        non_jpeg_b64 = base64.b64encode(b"PNG_HEADER_DATA_1234567890" * 10).decode("ascii")
+        assert_true(ss.validate_and_record_frame(non_jpeg_b64) is None, "Non-JPEG payload rejected")
+
+        # Accept valid JPEG data (SOI marker 0xFF 0xD8)
+        valid_jpeg_raw = b'\xff\xd8\xff\xe0\x00\x10JFIF' + (b'\x00' * 200)
+        valid_jpeg_b64 = base64.b64encode(valid_jpeg_raw).decode("ascii")
+        recorded_bytes = ss.validate_and_record_frame(valid_jpeg_b64)
+        assert_true(recorded_bytes == valid_jpeg_raw, "Valid JPEG payload accepted and returned")
+        assert_true(ss.frames_sent == 1, "Frames sent counter incremented")
+        assert_true(ss.latest_size_bytes == len(valid_jpeg_raw), "Size bytes recorded accurately")
+
+        # Recent-frame policy
+        ss.active = True
+        assert_true(ss.should_attach_to_turn(freshness_sec=2.5) is True, "Fresh frame attached to turn")
+        ss.mark_frame_sent_to_gemini()
+        assert_true(ss.should_attach_to_turn(freshness_sec=2.5) is False, "Frame not re-attached immediately (recent-frame policy)")
+        ss.reset()
+        assert_true(ss.active is False and ss.latest_frame_bytes is None, "Screenshare reset clears state")
+
+        # 11.4 Safe Tool Execution Contract Tests
+        async def mock_success_tool():
+            return {"files": ["index.html", "app.js"]}
+        res = await safe_execute_tool("list_project_files", "call_1", mock_success_tool())
+        assert_true(res.get("success") is True, "safe_execute_tool succeeds on valid tool execution")
+        assert_true(res.get("data", {}).get("files") == ["index.html", "app.js"], "safe_execute_tool preserves structured data")
+
+        async def mock_fail_tool():
+            raise FileNotFoundError("File 'missing.js' does not exist")
+        res_fail = await safe_execute_tool("read_project_file", "call_2", mock_fail_tool())
+        assert_true(res_fail.get("success") is False, "safe_execute_tool catches exception without raising")
+        assert_true(res_fail.get("error_type") == "FileNotFoundError", "Error type captured in structured contract")
+        assert_true(res_fail.get("recoverable") is True, "Recoverable flag set in structured contract")
+
+        async def mock_timeout_tool():
+            await asyncio.sleep(0.5)
+            return {"done": True}
+        res_timeout = await safe_execute_tool("slow_tool", "call_3", mock_timeout_tool(), timeout_sec=0.1)
+        assert_true(res_timeout.get("success") is False, "safe_execute_tool catches timeout")
+        assert_true(res_timeout.get("error_type") == "TIMEOUT", "TIMEOUT captured in structured contract")
+
+        # 11.5 API Model & Preference Endpoints
+        req_models = make_mocked_request("GET", "/api/models")
+        resp_models = await server.api_get_models(req_models)
+        assert_true(resp_models.status == 200, "/api/models returns HTTP 200")
+        models_data = json.loads(resp_models.text)
+        assert_true(models_data.get("success") is True, "/api/models returns success: true")
+        assert_true(len(models_data.get("live_models", [])) == 3, "/api/models lists all 3 live models")
+
+        # Health endpoint
+        req_health = make_mocked_request("GET", "/api/health")
+        resp_health = await server.api_health(req_health)
+        assert_true(resp_health.status == 200, "/api/health returns HTTP 200")
+        health_data = json.loads(resp_health.text)
+        assert_true(health_data.get("default_live_model") == "gemini-3.8-live", "Health returns default_live_model")
+        assert_true("live_models" in health_data and "code_models" in health_data, "Health returns live and code models")
+
+    except Exception as e:
+        assert_true(False, f"Section 11 test failed: {e}")
 
     print(f"\n=== TEST SUITE COMPLETED: {tests_passed} PASSED, {tests_failed} FAILED ===")
     return tests_failed == 0

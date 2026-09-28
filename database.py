@@ -392,6 +392,36 @@ async def save_user_api_key(user_id: int, api_key: str, username: str = None) ->
     )
     return {"success": True, "message": "API key verified and saved."}
 
+async def save_user_preference(user_id: int, key: str, value: any) -> bool:
+    """Saves a server-authoritative user preference (e.g. preferred_live_model, preferred_code_model)."""
+    if users_col is None:
+        return False
+    user_id_int = int(user_id)
+    now = datetime.now(timezone.utc)
+    await users_col.update_one(
+        {"user_id": user_id_int},
+        {"$set": {key: value, "updated_at": now}},
+        upsert=True
+    )
+    if profiles_col is not None:
+        try:
+            await profiles_col.update_one(
+                {"user_id": user_id_int},
+                {"$set": {key: value, "updated_at": now}},
+                upsert=False
+            )
+        except Exception:
+            pass
+    return True
+
+async def get_user_preferences(user_id: int) -> dict:
+    """Retrieves server-stored model preferences for a user."""
+    profile = await get_user_profile(user_id) or {}
+    return {
+        "preferred_live_model": profile.get("preferred_live_model"),
+        "preferred_code_model": profile.get("preferred_code_model")
+    }
+
 async def list_user_projects(user_id: int):
     """Lists all projects owned by a specific user."""
     if projects_col is None:

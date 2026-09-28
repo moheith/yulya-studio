@@ -1025,7 +1025,7 @@
       <div class="panel-header">
         <div class="tabs-group">
           <button class="tab-btn active" id="tabChat" onclick="switchTab('chat')">
-            <span id="chatTabIcon"></span> Chat
+            <span id="chatTabIcon"></span> Chat <span id="chatUnreadDot" style="display:none; width:6px; height:6px; background:#c084fc; border-radius:50%; margin-left:4px; box-shadow:0 0 6px #c084fc;"></span>
           </button>
           <button class="tab-btn" id="tabAntigravity" onclick="switchTab('antigravity')">
             <span id="antigravityTabIcon"></span> Antigravity
@@ -1088,6 +1088,7 @@
             <div class="status-pill code-model-pill clickable" id="antigravityModelPill" onclick="toggleAntigravityModelMenu(event)" title="Click to choose Antigravity Code Model">
               <span class="status-dot online"></span>
               <span id="antigravityModelText">Gemini 3.8 Flash</span>
+              <span id="antigravityFallbackBadge" style="display:none; font-size:9px; background:rgba(251,191,36,0.2); border:1px solid rgba(251,191,36,0.5); color:#fbbf24; padding:0 4px; border-radius:3px; margin-left:4px;">FALLBACK</span>
               <span class="pill-chevron" id="antigravityPillChevron">▼</span>
             </div>
             <div class="model-dropdown-menu" id="antigravityModelMenu">
@@ -1455,11 +1456,15 @@
     let currentSpeechTranscript = '';
     let isSpeechRecognitionActive = false;
 
-    // Model Selection State & Dropdowns
+    // Model Selection State & Dropdowns (Server-Authoritative)
     let selectedVoiceModel = localStorage.getItem('yulya_preferred_voice_model') || 'gemini-3.8-live';
     let selectedAntigravityModel = localStorage.getItem('yulya_preferred_code_model') || 'gemini-3.8-flash';
+    let liveModelsRegistry = [];
+    let codeModelsRegistry = [];
 
     function formatModelName(modelId) {
+      const found = codeModelsRegistry.find(m => m.id === modelId);
+      if (found) return found.display_name;
       const names = {
         'gemini-3.8-flash': 'Gemini 3.8 Flash',
         'gemini-3.7-flash': 'Gemini 3.7 Flash',
@@ -1473,6 +1478,8 @@
     }
 
     function formatVoiceModelName(modelId) {
+      const found = liveModelsRegistry.find(m => m.id === modelId);
+      if (found) return found.display_name;
       const names = {
         'gemini-3.8-live': 'Gemini 3.8 Live',
         'gemini-3.8-live-extended-thinking': 'Gemini 3.8 Live Extended Thinking',
@@ -1504,7 +1511,7 @@
       if (agyMenu) agyMenu.classList.remove('open');
     });
 
-    function selectVoiceModel(modelId, label) {
+    async function selectVoiceModel(modelId, label) {
       selectedVoiceModel = modelId;
       localStorage.setItem('yulya_preferred_voice_model', modelId);
 
@@ -1515,6 +1522,17 @@
           if (opt.getAttribute('data-model') === modelId) opt.classList.add('selected');
           else opt.classList.remove('selected');
         });
+      }
+
+      // Persist preference server-side (Section 3)
+      try {
+        await fetch('/api/preferences/live-model', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: modelId })
+        });
+      } catch (err) {
+        console.warn('[PREF] Failed to persist voice model preference:', err);
       }
 
       if (isLiveConnected) {
@@ -1530,7 +1548,7 @@
       }
     }
 
-    function selectAntigravityModel(modelId, label) {
+    async function selectAntigravityModel(modelId, label) {
       selectedAntigravityModel = modelId;
       localStorage.setItem('yulya_preferred_code_model', modelId);
 
@@ -1546,29 +1564,80 @@
       const labelEl = document.getElementById('antigravityModelText');
       if (labelEl) labelEl.textContent = label;
 
+      const fallbackBadge = document.getElementById('antigravityFallbackBadge');
+      if (fallbackBadge) fallbackBadge.style.display = 'none';
+
+      // Persist preference server-side (Section 3)
+      try {
+        await fetch('/api/preferences/code-model', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: modelId })
+        });
+      } catch (err) {
+        console.warn('[PREF] Failed to persist code model preference:', err);
+      }
+
       logAntigravity(`[ARCHITECT] Selected coding model: ${label}`, 'architect');
       ToastManager.show(`Antigravity model set to ${label}`, 'success');
     }
 
-    // Initialize model pills from storage on script evaluation
+    // Dynamic model registry loader from server-authoritative API
+    async function loadRegistryModels() {
+      try {
+        const res = await fetch('/api/models');
+        const data = await res.json();
+        if (data.success) {
+          if (Array.isArray(data.live_models) && data.live_models.length > 0) {
+            liveModelsRegistry = data.live_models;
+            const voiceMenu = document.getElementById('voiceModelMenu');
+            if (voiceMenu) {
+              let html = '<div class="dropdown-header">Gemini Voice Model</div>';
+              data.live_models.forEach(m => {
+                const isSelected = m.id === selectedVoiceModel;
+                const recBadge = m.is_default ? '<span class="badge-rec">Recommended</span>' : '';
+                const desc = m.supports_thinking ? 'Deep reasoning with non-blocking tools' : (m.id.includes('preview') ? 'Low-latency preview model' : 'Instant & reliable tools, audio, low latency');
+                html += `
+                  <div class="model-option ${isSelected ? 'selected' : ''}" data-model="${m.id}" onclick="selectVoiceModel('${m.id}', '${m.display_name}')">
+                    <div class="model-opt-title">${m.display_name} ${recBadge}</div>
+                    <div class="model-opt-desc">${desc}</div>
+                  </div>
+                `;
+              });
+              voiceMenu.innerHTML = html;
+            }
+          }
+
+          if (Array.isArray(data.code_models) && data.code_models.length > 0) {
+            codeModelsRegistry = data.code_models;
+            const agyMenu = document.getElementById('antigravityModelMenu');
+            if (agyMenu) {
+              let html = '<div class="dropdown-header">Antigravity Code Model</div>';
+              data.code_models.forEach(m => {
+                const isSelected = m.id === selectedAntigravityModel;
+                const defBadge = m.is_default ? '<span class="badge-rec">Default</span>' : '';
+                html += `
+                  <div class="model-option ${isSelected ? 'selected' : ''}" data-model="${m.id}" onclick="selectAntigravityModel('${m.id}', '${m.display_name}')">
+                    <div class="model-opt-title">${m.display_name} ${defBadge}</div>
+                    <div class="model-opt-desc">${m.family.toUpperCase()} &mdash; fast, robust code generation</div>
+                  </div>
+                `;
+              });
+              agyMenu.innerHTML = html;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[REGISTRY] Failed to load models from server:', err);
+      }
+    }
+
+    // Initialize model pills on script evaluation
     setTimeout(() => {
+      loadRegistryModels();
       const agyText = document.getElementById('antigravityModelText');
       if (agyText) {
         agyText.textContent = formatModelName(selectedAntigravityModel);
-      }
-      const agyMenu = document.getElementById('antigravityModelMenu');
-      if (agyMenu) {
-        agyMenu.querySelectorAll('.model-option').forEach(opt => {
-          if (opt.getAttribute('data-model') === selectedAntigravityModel) opt.classList.add('selected');
-          else opt.classList.remove('selected');
-        });
-      }
-      const vMenu = document.getElementById('voiceModelMenu');
-      if (vMenu) {
-        vMenu.querySelectorAll('.model-option').forEach(opt => {
-          if (opt.getAttribute('data-model') === selectedVoiceModel) opt.classList.add('selected');
-          else opt.classList.remove('selected');
-        });
       }
     }, 50);
 
@@ -1792,9 +1861,66 @@
     }
     speechRecognizer = setupSpeechRecognizer();
 
-    // --- Chat Tab Feed Management ---
-    let currentAiChatBubble = null;
-    let currentAiChatText = '';
+    // --- Chat Tab Feed Management (Turn-Aware Delta Assembly) ---
+    const activeTurns = {}; // { [turn_id]: { row, header, bubble, text, speaker, model, time } }
+
+    function handleTranscriptDelta(data) {
+      if (!data) return;
+      const turnId = data.turn_id || (data.speaker === 'user' ? 'legacy_user_turn' : 'legacy_ai_turn');
+      const speaker = data.speaker || 'ai';
+      const delta = data.delta || '';
+      const actualModel = data.model || formatVoiceModelName(selectedVoiceModel) || 'Gemini Live';
+      const isFinal = !!data.is_final;
+
+      const feed = document.getElementById('chatFeed');
+      if (!feed) return;
+      const hint = document.getElementById('chatEmptyHint');
+      if (hint) hint.style.display = 'none';
+
+      let turn = activeTurns[turnId];
+      if (!turn) {
+        const now = new Date();
+        const time = now.toTimeString().split(' ')[0];
+
+        const row = document.createElement('div');
+        row.className = `chat-bubble-row ${speaker}`;
+
+        const header = document.createElement('div');
+        header.className = 'chat-bubble-header';
+        const label = speaker === 'user' ? 'YOU' : actualModel.toUpperCase();
+        const color = speaker === 'user' ? '#38bdf8' : '#c084fc';
+        header.innerHTML = `<span style="color: ${color}; font-weight: 700;">${label}</span><span>${time}</span>`;
+
+        const bubble = document.createElement('div');
+        bubble.className = `chat-bubble ${speaker}`;
+
+        row.appendChild(header);
+        row.appendChild(bubble);
+        feed.appendChild(row);
+
+        turn = { row, header, bubble, text: '', speaker, model: label, time };
+        activeTurns[turnId] = turn;
+      }
+
+      if (delta) {
+        turn.text += delta;
+        turn.bubble.textContent = turn.text;
+        feed.scrollTop = feed.scrollHeight;
+      }
+
+      // If AI is speaking and user is not currently viewing the Chat tab, illuminate unread dot
+      if (speaker === 'ai' && activeTab !== 'chat') {
+        const dot = document.getElementById('chatUnreadDot');
+        if (dot) dot.style.display = 'inline-block';
+      }
+
+      if (isFinal) {
+        if (turn.text.trim()) {
+          chatHistory.push({ sender: speaker, text: turn.text.trim(), time: turn.time, model: turn.model });
+        }
+        delete activeTurns[turnId];
+      }
+    }
 
     function addChatMessage(sender, text, timeStr = null) {
       const feed = document.getElementById('chatFeed');
@@ -1804,16 +1930,16 @@
 
       const now = new Date();
       const time = timeStr || now.toTimeString().split(' ')[0];
-      chatHistory.push({ sender, text, time });
+      const modelLabel = sender === 'user' ? 'YOU' : (formatVoiceModelName(selectedVoiceModel) || 'GEMINI LIVE').toUpperCase();
+      chatHistory.push({ sender, text, time, model: modelLabel });
 
       const row = document.createElement('div');
       row.className = `chat-bubble-row ${sender}`;
 
       const header = document.createElement('div');
       header.className = 'chat-bubble-header';
-      const label = sender === 'user' ? 'YOU' : 'GEMINI 3.8 LIVE';
       const color = sender === 'user' ? '#38bdf8' : '#c084fc';
-      header.innerHTML = `<span style="color: ${color}; font-weight: 700;">${label}</span><span>${time}</span>`;
+      header.innerHTML = `<span style="color: ${color}; font-weight: 700;">${modelLabel}</span><span>${time}</span>`;
 
       const bubble = document.createElement('div');
       bubble.className = `chat-bubble ${sender}`;
@@ -1825,98 +1951,43 @@
       feed.scrollTop = feed.scrollHeight;
     }
 
-    let currentUserChatBubble = null;
-    let currentUserChatText = '';
-
     function appendUserChatText(chunk) {
       if (!chunk) return;
-      const feed = document.getElementById('chatFeed');
-      if (!feed) return;
-      const hint = document.getElementById('chatEmptyHint');
-      if (hint) hint.style.display = 'none';
-
-      if (!currentUserChatBubble) {
-        const now = new Date();
-        const time = now.toTimeString().split(' ')[0];
-
-        const row = document.createElement('div');
-        row.className = 'chat-bubble-row user';
-
-        const header = document.createElement('div');
-        header.className = 'chat-bubble-header';
-        header.innerHTML = `<span style="color: #38bdf8; font-weight: 700;">YOU</span><span>${time}</span>`;
-
-        const bubble = document.createElement('div');
-        bubble.className = 'chat-bubble user';
-
-        row.appendChild(header);
-        row.appendChild(bubble);
-        feed.appendChild(row);
-
-        currentUserChatBubble = bubble;
-        currentUserChatText = '';
-      }
-
-      currentUserChatText += chunk;
-      currentUserChatBubble.textContent = currentUserChatText;
-      feed.scrollTop = feed.scrollHeight;
+      handleTranscriptDelta({
+        turn_id: 'legacy_user_stream',
+        speaker: 'user',
+        delta: chunk,
+        is_final: false
+      });
     }
 
     function finalizeUserChatTurn() {
-      if (currentUserChatText.trim()) {
-        const now = new Date();
-        chatHistory.push({ sender: 'user', text: currentUserChatText.trim(), time: now.toTimeString().split(' ')[0] });
-      }
-      currentUserChatBubble = null;
-      currentUserChatText = '';
+      handleTranscriptDelta({
+        turn_id: 'legacy_user_stream',
+        speaker: 'user',
+        delta: '',
+        is_final: true
+      });
     }
 
     function appendAiChatText(chunk) {
       if (!chunk) return;
-      const feed = document.getElementById('chatFeed');
-      if (!feed) return;
-      const hint = document.getElementById('chatEmptyHint');
-      if (hint) hint.style.display = 'none';
-
-      if (currentUserChatBubble) {
-        finalizeUserChatTurn();
-      }
-
-      if (!currentAiChatBubble) {
-        const now = new Date();
-        const time = now.toTimeString().split(' ')[0];
-
-        const row = document.createElement('div');
-        row.className = 'chat-bubble-row ai';
-
-        const header = document.createElement('div');
-        header.className = 'chat-bubble-header';
-        const label = formatVoiceModelName(selectedVoiceModel) || 'GEMINI LIVE';
-        header.innerHTML = `<span style="color: #c084fc; font-weight: 700;">${label}</span><span>${time}</span>`;
-
-        const bubble = document.createElement('div');
-        bubble.className = 'chat-bubble ai';
-
-        row.appendChild(header);
-        row.appendChild(bubble);
-        feed.appendChild(row);
-
-        currentAiChatBubble = bubble;
-        currentAiChatText = '';
-      }
-
-      currentAiChatText += chunk;
-      currentAiChatBubble.textContent = currentAiChatText;
-      feed.scrollTop = feed.scrollHeight;
+      handleTranscriptDelta({
+        turn_id: 'legacy_ai_stream',
+        speaker: 'ai',
+        delta: chunk,
+        model: formatVoiceModelName(selectedVoiceModel),
+        is_final: false
+      });
     }
 
     function finalizeAiChatTurn() {
-      if (currentAiChatText.trim()) {
-        const now = new Date();
-        chatHistory.push({ sender: 'ai', text: currentAiChatText.trim(), time: now.toTimeString().split(' ')[0] });
-      }
-      currentAiChatBubble = null;
-      currentAiChatText = '';
+      handleTranscriptDelta({
+        turn_id: 'legacy_ai_stream',
+        speaker: 'ai',
+        delta: '',
+        is_final: true
+      });
     }
 
     // --- Live Text Messaging to Gemini Live ---
@@ -2142,6 +2213,8 @@
       clearBtn.style.display = 'inline-flex';
 
       if (tabName === 'chat') {
+        const dot = document.getElementById('chatUnreadDot');
+        if (dot) dot.style.display = 'none';
         const btn = document.getElementById('tabChat');
         if (btn) btn.classList.add('active');
         chatView.classList.add('active');
@@ -2323,10 +2396,14 @@
                 isAiSpeakingVoice = true;
                 logTerminal('[VOICE] Gemini Live speaking...', 'voice');
               }
-              setLiveStatus('Gemini 3.8 Live Speaking...', 'speaking');
+              setLiveStatus('Gemini Live Speaking...', 'speaking');
               if (data.pcm) {
                 liveAudioPlayer.playPCMChunk(data.pcm, data.rate || 24000);
               }
+            } else if (data.type === 'ai_transcript_delta') {
+              handleTranscriptDelta(data);
+            } else if (data.type === 'user_transcript_delta') {
+              handleTranscriptDelta(data);
             } else if (data.type === 'ai_text') {
               appendAiChatText(data.text);
             } else if (data.type === 'user_transcription') {
@@ -2347,6 +2424,54 @@
               finalizeAiChatTurn();
               finalizeUserChatTurn();
               logTerminal('[LIVE_AI] Speech interrupted by user input', 'live');
+            } else if (data.type === 'live_session_state') {
+              const state = data.state;
+              const actualModel = data.model_display || data.actual_model || 'Gemini Live';
+              if (data.actual_model) {
+                selectedVoiceModel = data.actual_model;
+                const vMenu = document.getElementById('voiceModelMenu');
+                if (vMenu) {
+                  vMenu.querySelectorAll('.model-option').forEach(opt => {
+                    if (opt.getAttribute('data-model') === data.actual_model) opt.classList.add('selected');
+                    else opt.classList.remove('selected');
+                  });
+                }
+              }
+
+              if (state === 'CONNECTED') {
+                isLiveConnected = true;
+                updateLiveButton(true);
+                setLiveStatus(actualModel, 'online');
+                ToastManager.show(`${actualModel} Connected`, 'success');
+              } else if (state === 'CONNECTING') {
+                updateLiveButton(false, true);
+                setLiveStatus(`Connecting to ${actualModel}...`, 'connecting');
+              } else if (state === 'LISTENING') {
+                isLiveConnected = true;
+                updateLiveButton(true);
+                setLiveStatus(actualModel + ' (Listening)', 'listening');
+              } else if (state === 'SPEAKING') {
+                setLiveStatus(actualModel + ' Speaking...', 'speaking');
+              } else if (state === 'THINKING') {
+                setLiveStatus(actualModel + ' Thinking...', 'thinking');
+              } else if (state === 'TOOL_RUNNING') {
+                setLiveStatus(actualModel + ' (Running Tool)...', 'thinking');
+              } else if (state === 'FALLING_BACK') {
+                setLiveStatus(data.reason || 'Falling back...', 'connecting');
+                ToastManager.show(data.reason || 'Live model falling back...', 'info');
+              } else if (state === 'INTERRUPTED') {
+                liveAudioPlayer.stop();
+                setLiveStatus(actualModel + ' Ready', 'online');
+              } else if (state === 'DISCONNECTED') {
+                isLiveConnected = false;
+                updateLiveButton(false);
+                setLiveStatus(actualModel + ' (Offline)', 'offline');
+              } else if (state === 'ERROR') {
+                isLiveConnected = false;
+                updateLiveButton(false);
+                setLiveStatus('Live Connection Error', 'offline');
+                if (data.reason) ToastManager.show(data.reason, 'error');
+              }
             } else if (data.type === 'live_status') {
               if (data.status === 'connected') {
                 isLiveConnected = true;
@@ -2371,7 +2496,6 @@
                   setLiveStatus(connectedModelName, 'online');
                   logTerminal(`[LIVE_AI] Connected to ${connectedModelName}. Hold Space to talk.`, 'live');
                 }
-                ToastManager.show(`${connectedModelName} Connected`, 'success');
               } else if (data.status === 'connecting') {
                 setLiveStatus(data.message || 'Connecting to Gemini Live...', 'connecting');
                 updateLiveButton(false, true);
@@ -2400,6 +2524,15 @@
               if (data.model_used) {
                 const labelEl = document.getElementById('antigravityModelText');
                 if (labelEl) labelEl.textContent = formatModelName(data.model_used);
+                const fbBadge = document.getElementById('antigravityFallbackBadge');
+                if (fbBadge) {
+                  if (data.model_used !== selectedAntigravityModel) {
+                    fbBadge.style.display = 'inline-block';
+                    fbBadge.title = `Waterfall fallback used. Requested: ${selectedAntigravityModel}`;
+                  } else {
+                    fbBadge.style.display = 'none';
+                  }
+                }
               }
               if (data.content) {
                 fileContents = data.content;
@@ -2965,24 +3098,35 @@
         canvas.height = 1080;
         const ctx = canvas.getContext('2d');
 
-        const captureAndSend = () => {
-          if (!screenStream || !ws || ws.readyState !== WebSocket.OPEN) return;
+        const captureFrame = () => {
+          if (!screenStream) return null;
           try {
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            const base64 = canvas.toDataURL('image/jpeg', 0.65).split(',')[1];
-            if (base64) {
-              ws.send(JSON.stringify({ type: 'video_frame', data: base64 }));
-            }
+            return canvas.toDataURL('image/jpeg', 0.65).split(',')[1];
           } catch (e) {
             console.warn('[VISION] Frame capture error:', e);
+            return null;
           }
         };
 
+        const initialFrame = captureFrame();
+
         // Notify server that screenshare started and send initial frame immediately
         if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'screenshare_status', active: true }));
+          ws.send(JSON.stringify({
+            type: 'screenshare_status',
+            active: true,
+            initial_frame: initialFrame
+          }));
         }
-        captureAndSend();
+
+        const captureAndSend = () => {
+          if (!screenStream || !ws || ws.readyState !== WebSocket.OPEN) return;
+          const frameB64 = captureFrame();
+          if (frameB64) {
+            ws.send(JSON.stringify({ type: 'video_frame', data: frameB64 }));
+          }
+        };
 
         screenInterval = setInterval(captureAndSend, 500); // 2 frames per second (500ms interval)
 

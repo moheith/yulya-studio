@@ -1,6 +1,19 @@
 import os
+import pathlib
 from pathlib import Path
 from dotenv import load_dotenv
+
+# Ensure pathlib._NormalAccessor.mkdir works reliably across wrapped os.mkdir environments
+if hasattr(pathlib, "_NormalAccessor") and hasattr(pathlib._NormalAccessor, "mkdir"):
+    _orig_mkdir = os.mkdir
+    class _CallableWrapper:
+        def __init__(self, func):
+            self.func = func
+        def __call__(self, *args, **kwargs):
+            return self.func(*args, **kwargs)
+        def __get__(self, instance, owner=None):
+            return self.func
+    pathlib._NormalAccessor.mkdir = _CallableWrapper(_orig_mkdir)
 
 load_dotenv()
 

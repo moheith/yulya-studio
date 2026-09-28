@@ -162,25 +162,21 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
             "existing_code": existing_code
         }
         
-        base_models = [
-            "gemini-3.8-flash",
-            "gemini-3.7-flash",
-            "gemini-3.6-flash",
-            "gemini-3.5-flash",
-            "gemini-3.1-flash-lite",
-            "gemini-3.5-flash-lite",
-            "gemini-2.5-flash"
-        ]
-        if preferred_model and preferred_model.strip():
-            pref = preferred_model.strip().lower()
-            model_cascade = [pref] + [m for m in base_models if m.lower() != pref]
-        else:
-            model_cascade = base_models
+        import models_registry
+        from live_session import classify_failure, is_fallback_eligible, FailureClass
+
+        req_model = (preferred_model or models_registry.DEFAULT_CODE_MODEL_ID).strip()
+        candidate_entries = models_registry.get_code_fallback_candidates(req_model)
+        model_cascade = [c.id for c in candidate_entries]
+        if not model_cascade:
+            model_cascade = [models_registry.DEFAULT_CODE_MODEL_ID]
 
         client = genai.Client(api_key=cleaned_key)
         raw_response = None
         used_model = None
         last_err = None
+        fallback_chain = []
+        fallback_reason = None
 
         for idx, model_name in enumerate(model_cascade):
             arch_step = f"[ARCHITECT] Compiling via {model_name}..."
@@ -210,41 +206,46 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
                 if raw_response:
                     used_model = model_name
                     break
-            except asyncio.TimeoutError:
-                last_err = TimeoutError(f"Model {model_name} timed out after 180 seconds.")
-                next_model = model_cascade[idx + 1] if idx + 1 < len(model_cascade) else None
-                if next_model:
-                    shift_step = f"[ARCHITECT] Model '{model_name}' timed out. Shifting to fallback '{next_model}'..."
-                    projects_manager.write_build_log(user_id_int, safe_slug, "ARCHITECT", shift_step)
-                    if log_callback:
-                        try: await log_callback("architect", shift_step)
-                        except Exception: pass
-                continue
-            except APIError as ae:
-                last_err = ae
-                err_str = str(ae)
-                # If invalid API key (400, 403), stop immediately
-                if "API_KEY_INVALID" in err_str or ae.code in (400, 403):
+            except Exception as e:
+                last_err = e
+                fallback_chain.append(model_name)
+                failure_type = classify_failure(e)
+                fallback_reason = f"{failure_type.value}: {str(e)[:100]}"
+
+                # Unrecoverable errors that must NOT trigger model fallback
+                if failure_type == FailureClass.AUTH:
                     user_err = "Your Google AI Studio API key could not be verified by Google AI."
                     fail_step = f"[FAIL] {user_err}"
                     projects_manager.write_build_log(user_id_int, safe_slug, "FAIL", fail_step)
                     if log_callback:
                         try: await log_callback("fail", fail_step)
                         except Exception: pass
-                    return {"success": False, "error": user_err}
-                next_model = model_cascade[idx + 1] if idx + 1 < len(model_cascade) else None
-                if next_model:
-                    shift_step = f"[ARCHITECT] Model '{model_name}' error ({ae.code}). Shifting to fallback '{next_model}'..."
-                    projects_manager.write_build_log(user_id_int, safe_slug, "ARCHITECT", shift_step)
+                    return {
+                        "success": False,
+                        "error": user_err,
+                        "requested_model": req_model,
+                        "fallback_used": False,
+                        "fallback_chain": fallback_chain
+                    }
+
+                if not is_fallback_eligible(failure_type):
+                    user_err = f"AI request failed ({failure_type.value}): {str(e)[:120]}"
+                    fail_step = f"[FAIL] {user_err}"
+                    projects_manager.write_build_log(user_id_int, safe_slug, "FAIL", fail_step)
                     if log_callback:
-                        try: await log_callback("architect", shift_step)
+                        try: await log_callback("fail", fail_step)
                         except Exception: pass
-                continue
-            except Exception as e:
-                last_err = e
+                    return {
+                        "success": False,
+                        "error": user_err,
+                        "requested_model": req_model,
+                        "fallback_used": False,
+                        "fallback_chain": fallback_chain
+                    }
+
                 next_model = model_cascade[idx + 1] if idx + 1 < len(model_cascade) else None
                 if next_model:
-                    shift_step = f"[ARCHITECT] Model '{model_name}' unavailable ({str(e)[:40]}). Shifting to fallback '{next_model}'..."
+                    shift_step = f"[ARCHITECT] Model '{model_name}' {failure_type.value} error. Shifting to fallback '{next_model}'..."
                     projects_manager.write_build_log(user_id_int, safe_slug, "ARCHITECT", shift_step)
                     if log_callback:
                         try: await log_callback("architect", shift_step)
@@ -254,14 +255,21 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
         if not raw_response:
             err_msg = str(last_err) if last_err else "All models in the generation waterfall failed."
             user_err = f"AI code generation failed across models: {err_msg[:120]}"
-            if "RESOURCE_EXHAUSTED" in err_msg:
+            if "RESOURCE_EXHAUSTED" in err_msg or "QUOTA" in err_msg:
                 user_err = "Google AI Studio quota reached across all tested models. Please wait a moment and try again."
             fail_step = f"[FAIL] {user_err}"
             projects_manager.write_build_log(user_id_int, safe_slug, "FAIL", fail_step)
             if log_callback:
                 try: await log_callback("fail", fail_step)
                 except Exception: pass
-            return {"success": False, "error": user_err}
+            return {
+                "success": False,
+                "error": user_err,
+                "requested_model": req_model,
+                "fallback_used": len(fallback_chain) > 0,
+                "fallback_chain": fallback_chain,
+                "fallback_reason": fallback_reason
+            }
             
         try:
             # Clean markdown code blocks if the model wrapped output anyway
