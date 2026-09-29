@@ -2125,19 +2125,20 @@ async def idle_monitor_loop():
 async def init_app():
     app = web.Application(middlewares=[security_headers_middleware])
     
-    # Startup tasks
-    app.on_startup.append(lambda a: database.init_db())
-    app.on_startup.append(lambda a: run_startup_validation())
-    
-    async def start_background_tasks(app):
+    # Startup and cleanup lifecycle
+    async def on_startup(app):
+        await database.init_db()
+        run_startup_validation()
         app['idle_task'] = asyncio.create_task(idle_monitor_loop())
-    async def cleanup_background_tasks(app):
+
+    async def on_cleanup(app):
         if 'idle_task' in app:
             app['idle_task'].cancel()
             await asyncio.gather(app['idle_task'], return_exceptions=True)
-            
-    app.on_startup.append(start_background_tasks)
-    app.on_cleanup.append(cleanup_background_tasks)
+
+    app.on_startup.append(on_startup)
+    app.on_cleanup.append(on_cleanup)
+
     
     # Static files route
     app.router.add_static("/static", config.STATIC_DIR)

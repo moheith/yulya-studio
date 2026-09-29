@@ -868,6 +868,16 @@ async def run_tests():
         assert_true(health_data.get("default_live_model") == "gemini-3.8-live", "Health returns default_live_model")
         assert_true("live_models" in health_data and "code_models" in health_data, "Health returns live and code models")
 
+        # 11.6 Full Application Startup & Teardown Lifecycle Test
+        app = await server.init_app()
+        runner = server.web.AppRunner(app)
+        await runner.setup()
+        assert_true(app.get("idle_task") is not None, "Idle task started on app runner setup")
+        await runner.cleanup()
+        assert_true(True, "App startup and cleanup lifecycle succeeded without exceptions")
+
+
+
     except Exception as e:
         assert_true(False, f"Section 11 test failed: {e}")
 
