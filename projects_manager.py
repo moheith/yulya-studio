@@ -1065,3 +1065,44 @@ def create_zip_archive(user_id: int, slug: str) -> io.BytesIO:
                 zf.write(file_path, arcname)
     zip_buffer.seek(0)
     return zip_buffer
+
+def compute_file_hashes(user_id: int, slug: str) -> dict:
+    """Computes SHA-256 hashes for all non-internal project files."""
+    import hashlib
+    files = list_project_files(user_id, slug)
+    hashes = {}
+    for f in files:
+        try:
+            content = read_project_file(user_id, slug, f)
+            hashes[f] = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        except Exception:
+            pass
+    return hashes
+
+def snapshot_project(user_id: int, slug: str) -> dict:
+    """Captures a complete in-memory snapshot of the project files for transactional rollback."""
+    files = list_project_files(user_id, slug)
+    snap = {}
+    for f in files:
+        try:
+            snap[f] = read_project_file(user_id, slug, f)
+        except Exception:
+            pass
+    return snap
+
+def restore_snapshot(user_id: int, slug: str, snapshot: dict) -> bool:
+    """Restores the project strictly to the snapshot, removing any files created during a failed build transaction."""
+    current_files = list_project_files(user_id, slug)
+    for f in current_files:
+        if f not in snapshot:
+            try:
+                delete_project_file(user_id, slug, f)
+            except Exception:
+                pass
+    for f, content in snapshot.items():
+        try:
+            write_project_file(user_id, slug, f, content)
+        except Exception:
+            pass
+    return True
+

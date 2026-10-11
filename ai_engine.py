@@ -19,7 +19,15 @@ def get_project_lock(user_id: int, slug: str) -> asyncio.Lock:
     return PROJECT_LOCKS[key]
 
 SYSTEM_PROMPT = """You are Antigravity, the Principal Autonomous Game Engineering Agent for Yulya Studio.
-You design, build, test, and repair high-performance web games running in sandboxed iframes.
+You design, build, test, and maintain high-performance web games running in sandboxed iframes.
+
+**CRITICAL: PRESERVATION OF EXISTING MECHANICS & CODE (MANDATORY RULE):**
+1. When modifying an existing project, your default approach MUST be INCREMENTAL PRESERVATION.
+2. Maintain all existing working mechanics, physics, controls, sound effects, particle systems, score tracking, game states, and UI.
+3. NEVER replace an entire multi-featured game with a minimal stub or generic prototype on a second or subsequent request!
+4. If the user asks for a feature addition (e.g. 'Add a laser gun' or 'Add a high score counter'), keep all existing movement, enemy AI, collision detection, and visuals intact. Add the new feature cleanly into the existing game structure.
+5. If the user asks for a bug fix, isolate and repair only the affected function or system. Do NOT rewrite unrelated code.
+6. Only do a complete file replacement if the requested change requires architectural overhaul or if the user explicitly requested a complete rewrite.
 
 **Strict Sandboxing & Security Rules (Enforced by Server Vault):**
 1. You are strictly isolated to *this project's folder* (data/projects/{user_id}/{slug}/). You can create any web game files or subfolders (HTML, CSS, JS, JSON, SVG, PNG, MP3, GLTF, etc.), but NEVER attempt to access outside this folder.
@@ -47,20 +55,21 @@ Organize files cleanly into modular structures:
 - Assets: `assets/` (e.g. `assets/sprites.svg`, data URIs, or vector graphics)
 - Project Memory: maintain architectural details in `project_manifest.json`
 
-**Structured Execution & Quality Standards:**
-1. Execute in phases: Architecture -> Core Gameplay -> Controls -> Audio & Effects -> UI & Polish -> Validation.
-2. Complete files only: Output full, runnable code files. Never return partial diffs or placeholders.
-3. Responsive & Multi-Input: Support keyboard (WASD/Arrows), pointer/mouse, and mobile touch.
-4. Error Handling: Always provide game over, restart, score counter, and pause state.
-5. When modifying existing projects, preserve working mechanics and incrementally enhance.
-
 **Output Format:**
-Output strictly valid JSON with no markdown wrapping:
+Output strictly valid JSON with no markdown wrapping.
+You may output targeted `changes` (search-and-replace blocks for precision edits) and/or `files` (complete file replacements or newly created files):
 {
   "summary": "1-2 sentence engineering summary of what was built or repaired",
+  "changes": [
+    {
+      "file": "app.js",
+      "search": "exact string to search for in existing file",
+      "replace": "new string to replace it with"
+    }
+  ],
   "files": {
-    "index.html": "<complete file content>",
-    "app.js": "<complete file content>"
+    "index.html": "<complete file content if created or completely updated>",
+    "app.js": "<complete file content if full file update is preferred>"
   },
   "manifest_updates": {
     "engine": "phaser|three.js|pixijs|matter.js|canvas2d",
@@ -72,6 +81,83 @@ Output strictly valid JSON with no markdown wrapping:
 }
 """
 
+def classify_request(prompt: str, repo_files: list) -> str:
+    """
+    Classifies the user prompt into one of:
+    - NEW_PROJECT: No repo files or empty repository
+    - EXPLICIT_REWRITE: Creator explicitly requests a total wipe / complete restart from scratch
+    - TARGETED_BUG_FIX: Fixing a specific bug, error, broken logic, or typo
+    - REFACTOR: Code cleanup, performance, or reorganizing without changing mechanics
+    - FEATURE_ADDITION: Adding new features or tweaking mechanics while preserving everything else
+    """
+    if not repo_files or len(repo_files) == 0:
+        return "NEW_PROJECT"
+
+    p_lower = prompt.lower()
+
+    rewrite_patterns = [
+        "completely rewrite", "wipe and restart", "start over from scratch",
+        "delete everything and create", "make a completely new game",
+        "scratch everything", "fresh game", "total rewrite", "recreate from scratch"
+    ]
+    if any(pat in p_lower for pat in rewrite_patterns):
+        return "EXPLICIT_REWRITE"
+
+    bug_patterns = [
+        "fix", "bug", "error", "broken", "crash", "doesn't work", "does not work",
+        "won't move", "not moving", "stuck", "typo", "fails", "glitch", "repair",
+        "not showing", "not displaying", "can't jump", "cannot jump"
+    ]
+    if any(pat in p_lower for pat in bug_patterns):
+        return "TARGETED_BUG_FIX"
+
+    refactor_patterns = ["refactor", "clean up", "optimize performance", "reorganize"]
+    if any(pat in p_lower for pat in refactor_patterns):
+        return "REFACTOR"
+
+    return "FEATURE_ADDITION"
+
+def apply_search_replace(content: str, search: str, replace: str) -> tuple[str, bool, str]:
+    """
+    Applies search-and-replace to content.
+    Tries exact match first. If not found, tries normalized line-ending and whitespace-stripped matches.
+    Returns (new_content, success, error_message).
+    """
+    if not search:
+        return content, False, "Empty search block."
+
+    if search in content:
+        return content.replace(search, replace, 1), True, ""
+
+    norm_content = content.replace("\r\n", "\n")
+    norm_search = search.replace("\r\n", "\n")
+    norm_replace = replace.replace("\r\n", "\n")
+    if norm_search in norm_content:
+        new_norm = norm_content.replace(norm_search, norm_replace, 1)
+        if "\r\n" in content:
+            return new_norm.replace("\n", "\r\n"), True, ""
+        return new_norm, True, ""
+
+    search_lines = [l.strip() for l in norm_search.strip().splitlines() if l.strip()]
+    if search_lines:
+        content_lines = norm_content.splitlines()
+        match_idx = -1
+        for i in range(len(content_lines) - len(search_lines) + 1):
+            if all(content_lines[i + j].strip() == search_lines[j] for j in range(len(search_lines))):
+                match_idx = i
+                break
+        if match_idx != -1:
+            before = content_lines[:match_idx]
+            after = content_lines[match_idx + len(search_lines):]
+            rep_lines = norm_replace.splitlines()
+            result_lines = before + rep_lines + after
+            result_text = "\n".join(result_lines)
+            if "\r\n" in content:
+                result_text = result_text.replace("\n", "\r\n")
+            return result_text, True, ""
+
+    return content, False, f"Search block not found in file (search block was {len(search)} chars)."
+
 def truncate_context(content: str, max_chars: int = 100000) -> str:
     """Limits code context sent to Gemini to avoid runaway token explosion (Section 84)."""
     if len(content) <= max_chars:
@@ -80,11 +166,22 @@ def truncate_context(content: str, max_chars: int = 100000) -> str:
     half = max_chars // 2
     return content[:half] + "\n/* ... [context truncated for length] ... */\n" + content[-half:]
 
-async def process_code_request(api_key: str, user_id: int, username: str, slug: str, prompt: str, log_callback=None, preferred_model: str = None) -> dict:
+async def process_code_request(
+    api_key: str,
+    user_id: int,
+    username: str,
+    slug: str,
+    prompt: str,
+    log_callback=None,
+    preferred_model: str = None,
+    request_id: str = None,
+    build_id: str = None
+) -> dict:
     """
     Executes an AI code creation or modification request using the user's personal Gemini API key.
     Uses per-project locks, Antigravity CLI activity steps, build.log persistence, and strict path sandboxing.
     Supports preferred_model selection with automatic waterfall shifting on error.
+    Enforces transactional snapshotting and rollback on destructive shrinkage or validation failures.
     """
     try:
         user_id_int = int(user_id)
@@ -103,6 +200,10 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
     async with lock:
         cleaned_key = api_key.strip()
         
+        # Capture in-memory snapshot for transactional rollback & preservation
+        snapshot = projects_manager.snapshot_project(user_id_int, safe_slug)
+        initial_total_lines = sum(len(c.splitlines()) for c in snapshot.values())
+
         # Persist user prompt and emit Antigravity CLI steps
         projects_manager.write_build_log(user_id_int, safe_slug, "USER", prompt)
         
@@ -124,6 +225,10 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
                 pass
                 
         repo_files = projects_manager.list_project_files(user_id_int, safe_slug)
+        req_type = classify_request(prompt, repo_files)
+        class_step = f"[CLASSIFY] Request classified as {req_type} (preserving {len(repo_files)} existing files)"
+        projects_manager.write_build_log(user_id_int, safe_slug, "CLASSIFY", class_step)
+
         existing_code = {}
         text_exts = {".html", ".css", ".js", ".json", ".svg", ".txt", ".csv", ".tsv", ".xml"}
         for rf in repo_files:
@@ -155,6 +260,7 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
 
         context_payload = {
             "user_request": prompt,
+            "request_type": req_type,
             "project_name": safe_slug,
             "creator": username,
             "project_manifest": manifest_data,
@@ -285,83 +391,163 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
             data = json.loads(clean_text)
             summary = data.get("summary", "Updated project files.")
             files = data.get("files", {})
-            
-            if not isinstance(files, dict) or not files:
-                fail_step = "[FAIL] AI response did not contain updated files."
-                projects_manager.write_build_log(user_id_int, safe_slug, "FAIL", fail_step)
-                if log_callback:
-                    try: await log_callback("fail", fail_step)
-                    except Exception: pass
-                return {
-                    "success": False,
-                    "error": "AI response did not contain updated files."
-                }
-                
-            saved_files = []
-            # Disallow any path traversal or modification outside this specific game repository
-            for fname, content in files.items():
-                if not fname or not isinstance(fname, str) or not isinstance(content, str):
-                    continue
-                    
-                # Support relative subpaths while strictly blocking traversal
-                clean_fname = fname.replace("\\", "/").strip().lstrip("/")
-                if not clean_fname or any(p in clean_fname for p in ["..", "%", "\0", ":"]):
-                    print(f"[SECURITY] Blocked path traversal attempt by AI: '{fname}'")
-                    continue
-                    
-                parts = clean_fname.split("/")
-                if any(p in ("..", ".", "") or not re.match(r'^[a-zA-Z0-9_.\-]+$', p) for p in parts):
-                    print(f"[SECURITY] Blocked invalid path components by AI: '{fname}'")
-                    continue
-                    
-                safe_name = parts[-1]
-                # Block protected or system files
-                if safe_name.startswith(".") or safe_name in projects_manager.PROTECTED_FILES or any(p in projects_manager.PROTECTED_FILES for p in parts):
-                    print(f"[SECURITY] Blocked attempt to touch protected file: '{clean_fname}'")
-                    continue
-                    
-                # Block disallowed extensions and verify allowed game extension
-                ext = Path(safe_name).suffix.lower()
-                if ext in projects_manager.DISALLOWED_EXTENSIONS or ext not in projects_manager.ALLOWED_GAME_EXTENSIONS:
-                    print(f"[SECURITY] Blocked disallowed file creation by AI: '{clean_fname}'")
-                    continue
-                    
-                try:
-                    line_count = len(content.splitlines())
-                    written_path = projects_manager.write_project_file(user_id_int, safe_slug, clean_fname, content)
-                    saved_files.append(written_path)
-                    
-                    diff_step = f"[DIFF] {written_path}: +{line_count} lines ({len(content)} bytes)"
-                    projects_manager.write_build_log(user_id_int, safe_slug, "DIFF", diff_step)
-                    if log_callback:
-                        try: await log_callback("diff", diff_step)
-                        except Exception: pass
+            changes = data.get("changes", [])
 
-                    replace_step = f"[REPLACE_CONTENT] Updated {written_path} ({len(content)} bytes)"
-                    projects_manager.write_build_log(user_id_int, safe_slug, "REPLACE_CONTENT", replace_step)
-                    if log_callback:
-                        try:
-                            await log_callback("replace_content", replace_step)
-                            await log_callback("tool", f"[TOOL] Antigravity tool: write_file({written_path})")
-                        except Exception: pass
-                except Exception as write_err:
-                    print(f"[SECURITY] write_project_file rejected '{clean_fname}': {write_err}")
-                    continue
-                    
-            if not saved_files:
-                fail_step = "[FAIL] No valid game files (HTML, CSS, JS) were generated."
+            if not files and not changes:
+                fail_step = "[FAIL] AI response did not contain updated files or targeted changes."
                 projects_manager.write_build_log(user_id_int, safe_slug, "FAIL", fail_step)
                 if log_callback:
                     try: await log_callback("fail", fail_step)
                     except Exception: pass
                 return {
                     "success": False,
-                    "error": "No valid game files (HTML, CSS, JS) were generated."
+                    "error": "AI response did not contain updated files or targeted changes."
                 }
-                
+
+            saved_files = []
+
+            # 1. Apply targeted search-and-replace changes first to preserve existing mechanics
+            if isinstance(changes, list):
+                for chg in changes:
+                    if not isinstance(chg, dict):
+                        continue
+                    chg_file = chg.get("file", "").replace("\\", "/").strip().lstrip("/")
+                    search_str = chg.get("search", "")
+                    replace_str = chg.get("replace", "")
+                    if not chg_file or not search_str or replace_str is None:
+                        continue
+                    if any(p in chg_file for p in ["..", "%", "\0", ":"]):
+                        continue
+                    parts = chg_file.split("/")
+                    if any(p in ("..", ".", "") or not re.match(r'^[a-zA-Z0-9_.\-]+$', p) for p in parts):
+                        continue
+                    safe_name = parts[-1]
+                    if safe_name.startswith(".") or safe_name in projects_manager.PROTECTED_FILES or any(p in projects_manager.PROTECTED_FILES for p in parts):
+                        continue
+                    ext = Path(safe_name).suffix.lower()
+                    if ext in projects_manager.DISALLOWED_EXTENSIONS or ext not in projects_manager.ALLOWED_GAME_EXTENSIONS:
+                        continue
+
+                    cur_content = projects_manager.read_project_file(user_id_int, safe_slug, chg_file)
+                    if cur_content:
+                        new_content, ok, chg_err = apply_search_replace(cur_content, search_str, replace_str)
+                        if ok:
+                            try:
+                                written_path = projects_manager.write_project_file(user_id_int, safe_slug, chg_file, new_content)
+                                if written_path not in saved_files:
+                                    saved_files.append(written_path)
+                                diff_step = f"[DIFF] Targeted update in {written_path} (search/replace applied)"
+                                projects_manager.write_build_log(user_id_int, safe_slug, "DIFF", diff_step)
+                                if log_callback:
+                                    try: await log_callback("diff", diff_step)
+                                    except Exception: pass
+                            except Exception as write_err:
+                                print(f"[ANTIGRAVITY] write_project_file error on targeted change: {write_err}")
+
+            # 2. Apply full files or newly created files
+            if isinstance(files, dict):
+                for fname, content in files.items():
+                    if not fname or not isinstance(fname, str) or not isinstance(content, str):
+                        continue
+
+                    clean_fname = fname.replace("\\", "/").strip().lstrip("/")
+                    if not clean_fname or any(p in clean_fname for p in ["..", "%", "\0", ":"]):
+                        print(f"[SECURITY] Blocked path traversal attempt by AI: '{fname}'")
+                        continue
+
+                    parts = clean_fname.split("/")
+                    if any(p in ("..", ".", "") or not re.match(r'^[a-zA-Z0-9_.\-]+$', p) for p in parts):
+                        print(f"[SECURITY] Blocked invalid path components by AI: '{fname}'")
+                        continue
+
+                    safe_name = parts[-1]
+                    if safe_name.startswith(".") or safe_name in projects_manager.PROTECTED_FILES or any(p in projects_manager.PROTECTED_FILES for p in parts):
+                        print(f"[SECURITY] Blocked attempt to touch protected file: '{clean_fname}'")
+                        continue
+
+                    ext = Path(safe_name).suffix.lower()
+                    if ext in projects_manager.DISALLOWED_EXTENSIONS or ext not in projects_manager.ALLOWED_GAME_EXTENSIONS:
+                        print(f"[SECURITY] Blocked disallowed file creation by AI: '{clean_fname}'")
+                        continue
+
+                    try:
+                        line_count = len(content.splitlines())
+                        written_path = projects_manager.write_project_file(user_id_int, safe_slug, clean_fname, content)
+                        if written_path not in saved_files:
+                            saved_files.append(written_path)
+
+                        diff_step = f"[DIFF] {written_path}: +{line_count} lines ({len(content)} bytes)"
+                        projects_manager.write_build_log(user_id_int, safe_slug, "DIFF", diff_step)
+                        if log_callback:
+                            try: await log_callback("diff", diff_step)
+                            except Exception: pass
+
+                        replace_step = f"[REPLACE_CONTENT] Updated {written_path} ({len(content)} bytes)"
+                        projects_manager.write_build_log(user_id_int, safe_slug, "REPLACE_CONTENT", replace_step)
+                        if log_callback:
+                            try:
+                                await log_callback("replace_content", replace_step)
+                                await log_callback("tool", f"[TOOL] Antigravity tool: write_file({written_path})")
+                            except Exception: pass
+                    except Exception as write_err:
+                        print(f"[SECURITY] write_project_file rejected '{clean_fname}': {write_err}")
+                        continue
+
+            if not saved_files:
+                fail_step = "[FAIL] No valid game files (HTML, CSS, JS) were generated or modified."
+                projects_manager.write_build_log(user_id_int, safe_slug, "FAIL", fail_step)
+                if log_callback:
+                    try: await log_callback("fail", fail_step)
+                    except Exception: pass
+                return {
+                    "success": False,
+                    "error": "No valid game files (HTML, CSS, JS) were generated or modified."
+                }
+
+            # 3. Detect Destructive Shrinkage: protect against AI stripping existing mechanics
+            if req_type in ("TARGETED_BUG_FIX", "FEATURE_ADDITION", "REFACTOR"):
+                is_shrinkage = False
+                shrink_details = ""
+                # Check per-file shrinkage for files replaced by AI
+                if isinstance(files, dict):
+                    for fname, content in files.items():
+                        clean_fname = fname.replace("\\", "/").strip().lstrip("/")
+                        if clean_fname in snapshot:
+                            old_lines = len(snapshot[clean_fname].splitlines())
+                            new_lines = len(content.splitlines())
+                            if old_lines >= 15 and new_lines < int(old_lines * 0.5):
+                                is_shrinkage = True
+                                shrink_details = f"File '{clean_fname}' shrunk from {old_lines} to {new_lines} lines"
+                                break
+
+                # Also check overall project lines
+                if not is_shrinkage and initial_total_lines >= 20:
+                    current_total_lines = sum(
+                        len(projects_manager.read_project_file(user_id_int, safe_slug, f).splitlines())
+                        for f in projects_manager.list_project_files(user_id_int, safe_slug)
+                    )
+                    if current_total_lines < int(initial_total_lines * 0.5):
+                        is_shrinkage = True
+                        shrink_details = f"Project total lines dropped from {initial_total_lines} to {current_total_lines}"
+
+                if is_shrinkage:
+                    shrink_msg = f"Destructive code shrinkage detected ({shrink_details}). Rolling back to preserve existing game mechanics."
+                    print(f"[ANTIGRAVITY ROLLBACK] {shrink_msg}")
+                    projects_manager.restore_snapshot(user_id_int, safe_slug, snapshot)
+                    fail_step = f"[FAIL] {shrink_msg}"
+                    projects_manager.write_build_log(user_id_int, safe_slug, "FAIL", fail_step)
+                    if log_callback:
+                        try: await log_callback("fail", fail_step)
+                        except Exception: pass
+                    return {
+                        "success": False,
+                        "error": shrink_msg,
+                        "rollback_executed": True
+                    }
+
             # Run Autonomous Validation & Diagnostics
             val_result = projects_manager.validate_project(user_id_int, safe_slug)
-            
+
             # Autonomous Repair Loop: if validation detects broken references or errors, attempt auto-repair
             if not val_result.get("valid") and val_result.get("errors"):
                 repair_prompt = f"Validation found issues in the project: {val_result['errors']}. Please repair the files."
@@ -370,7 +556,7 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
                 if log_callback:
                     try: await log_callback("repair", repair_step)
                     except Exception: pass
-                    
+
                 # Execute targeted repair cycle
                 try:
                     repair_context = {
@@ -407,7 +593,7 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
                             except Exception:
                                 continue
                         return None
-                        
+
                     repair_raw = await asyncio.wait_for(asyncio.to_thread(_repair_gemini), timeout=30.0)
                     if repair_raw:
                         rep_text = repair_raw.strip()
@@ -439,6 +625,21 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
                 except Exception as repair_exc:
                     print(f"[REPAIR] Repair loop bypassed: {repair_exc}")
 
+            # 4. If project is STILL invalid and a pre-build snapshot exists, rollback to protect working state!
+            if not val_result.get("valid") and snapshot:
+                print(f"[ANTIGRAVITY ROLLBACK] Validation failed after repair ({val_result.get('errors')}). Restoring snapshot.")
+                projects_manager.restore_snapshot(user_id_int, safe_slug, snapshot)
+                fail_step = f"[FAIL] Validation failed: {val_result.get('errors')}. Restored previous working state."
+                projects_manager.write_build_log(user_id_int, safe_slug, "FAIL", fail_step)
+                if log_callback:
+                    try: await log_callback("fail", fail_step)
+                    except Exception: pass
+                return {
+                    "success": False,
+                    "error": f"Build broke project validation ({', '.join(val_result.get('errors', []))}). Restored previous working snapshot.",
+                    "rollback_executed": True
+                }
+
             # Verify build
             engine_info = val_result.get("detected_engine", "canvas2d")
             libs_info = f" with {', '.join(val_result.get('libraries', []))}" if val_result.get("libraries") else ""
@@ -456,11 +657,11 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
                 manifest_updates["engine"] = engine_info
             if val_result.get("libraries"):
                 manifest_updates["libraries"] = val_result["libraries"]
-                
+
             cur_manifest = projects_manager.get_project_manifest(user_id_int, safe_slug)
             manifest_updates["current_build"] = cur_manifest.get("current_build", 1) + 1
             updated_manifest = projects_manager.update_project_manifest(user_id_int, safe_slug, manifest_updates)
-            
+
             manifest_step = f"[MANIFEST] Architecture memory updated: build #{updated_manifest.get('current_build', 1)} ({updated_manifest.get('engine', 'canvas2d')})"
             projects_manager.write_build_log(user_id_int, safe_slug, "MANIFEST", manifest_step)
             if log_callback:
@@ -483,24 +684,33 @@ async def process_code_request(api_key: str, user_id: int, username: str, slug: 
                 files=saved_files,
                 tags=existing_tags
             )
-            
-            # Read back saved files
-            updated_content = {f: projects_manager.read_project_file(user_id_int, safe_slug, f) for f in saved_files}
-            
+
+            # Read back ALL project text files so frontend editor tabs retain untouched files!
+            all_repo_files = projects_manager.list_project_files(user_id_int, safe_slug)
+            full_project_content = {}
+            for f in all_repo_files:
+                if Path(f).suffix.lower() in text_exts:
+                    try:
+                        full_project_content[f] = projects_manager.read_project_file(user_id_int, safe_slug, f)
+                    except Exception:
+                        pass
+
             pass_step = f"[PASS] Build complete: {summary}"
             projects_manager.write_build_log(user_id_int, safe_slug, "PASS", pass_step)
             if log_callback:
                 try: await log_callback("pass", pass_step)
                 except Exception: pass
-                
+
             return {
                 "success": True,
                 "model_used": used_model,
                 "summary": summary,
                 "files": saved_files,
-                "content": updated_content,
+                "content": full_project_content,
                 "manifest": updated_manifest,
-                "validation": val_result
+                "validation": val_result,
+                "request_id": request_id,
+                "build_id": build_id
             }
         except json.JSONDecodeError as jde:
             fail_step = f"[FAIL] Invalid JSON generated: {str(jde)[:80]}"

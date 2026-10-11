@@ -59,6 +59,8 @@ ACTIVE_STUDIO_WS = {}
 # Active build admission controller: set of (user_id, slug) currently running builds
 ACTIVE_PROJECT_BUILDS = set()
 MAX_CONCURRENT_SYSTEM_BUILDS = 5
+RECENT_BUILD_RESPONSES = {} # (user_id, slug, request_id) -> (timestamp, response_dict)
+
 
 # Active Gemini Live sessions per creator WebSocket:
 # { ws: { "session": AsyncSession, "cm": context_manager, "receive_task": asyncio.Task, "slug": str, "client": genai.Client, "context": LiveSessionContext } }
@@ -454,6 +456,8 @@ async def api_modify_project(request: web.Request) -> web.Response:
         body = await request.json()
         slug = body.get("slug")
         prompt = body.get("prompt", "").strip()
+        request_id = str(body.get("request_id") or f"req_{int(time.time()*1000)}").strip()
+        build_id = f"bld_{int(time.time()*1000)}"
         
         if not slug or not prompt:
             return web.json_response({"success": False, "error": "Missing slug or prompt."}, status=400)
@@ -462,6 +466,14 @@ async def api_modify_project(request: web.Request) -> web.Response:
         proj = await database.get_project(user["id"], slug)
         if not proj:
             return web.json_response({"success": False, "error": "Project not found or not owned by you."}, status=404)
+
+        # Idempotency check: if this request_id was processed within 60s, return cached result
+        now_ts = time.time()
+        dedup_key = (int(user["id"]), slug.lower(), request_id)
+        if dedup_key in RECENT_BUILD_RESPONSES:
+            cached_time, cached_res = RECENT_BUILD_RESPONSES[dedup_key]
+            if now_ts - cached_time < 60:
+                return web.json_response(cached_res)
             
         profile = await database.get_user_profile(user["id"])
         api_key = profile.get("studio_api_key") if profile else None
@@ -470,13 +482,26 @@ async def api_modify_project(request: web.Request) -> web.Response:
             
         model = body.get("model")
 
-        # Broadcast Antigravity CLI log steps to connected WebSockets
+        # Broadcast Antigravity CLI log steps to connected WebSockets with structured channel and IDs
         async def _log_callback(step_type, message_text):
-            await broadcast_project_log(slug, message_text, step_type)
+            await broadcast_project_log(
+                slug, message_text, level=step_type, channel="antigravity",
+                request_id=request_id, build_id=build_id
+            )
             
         result = await ai_engine.process_code_request(
-            api_key, user["id"], user["username"], slug, prompt, log_callback=_log_callback, preferred_model=model
+            api_key, user["id"], user["username"], slug, prompt,
+            log_callback=_log_callback, preferred_model=model,
+            request_id=request_id, build_id=build_id
         )
+        
+        # Cache idempotency response
+        RECENT_BUILD_RESPONSES[dedup_key] = (now_ts, result)
+        # Clean older responses
+        if len(RECENT_BUILD_RESPONSES) > 200:
+            expired = [k for k, v in RECENT_BUILD_RESPONSES.items() if now_ts - v[0] > 120]
+            for k in expired:
+                RECENT_BUILD_RESPONSES.pop(k, None)
         
         if result.get("success"):
             # Hot-reload update to creator + spectators (Section 20)
@@ -485,6 +510,8 @@ async def api_modify_project(request: web.Request) -> web.Response:
                 "summary": result["summary"],
                 "content": result["content"],
                 "model_used": result.get("model_used"),
+                "request_id": request_id,
+                "build_id": build_id,
                 "timestamp": int(time.time())
             })
             slot = ACTIVE_STUDIO_WS.get(slug, {})
@@ -515,6 +542,7 @@ async def api_modify_project(request: web.Request) -> web.Response:
         return web.json_response(result)
     except Exception as e:
         return web.json_response({"success": False, "error": f"Error modifying project: {str(e)}"}, status=500)
+
 
 async def api_delete_project(request: web.Request) -> web.Response:
     """Deletes a project safely (Section 74)"""
@@ -1002,49 +1030,27 @@ You are speaking in real-time to creator @{creator_name} who is building a web g
 **Your Role as Creative Director & Game Architect:**
 You are the creative brain, technical director, and pair-programming co-pilot. You lead game design, recommend technology architectures, inspect project code and build progress via your tools, draft precise engineering prompts for Antigravity (the coding engine), and actively observe gameplay via 1080p screenshare.
 
-**Workflow & Guidelines:**
+**MANDATORY TOOL-SELECTION & CODE INSPECTION POLICY:**
+Before diagnosing a bug, explaining how a feature works, or suggesting code changes:
+YOU MUST CALL YOUR READ-ONLY TOOLS (`read_project_file`, `list_project_files`, `get_project_summary`, `search_project`, `validate_project`) TO INSPECT THE ACTUAL CODEBASE FIRST.
+Never guess or hallucinate code without reading the actual project files. When the creator asks questions like "Why does my player clip through walls?" or "What physics engine am I using?", invoke `read_project_file(path='app.js')` or `get_project_summary()` immediately.
 
-1. **Design Interview & Option Offering:**
-   - When the creator describes an idea, ask smart, focused questions.
-   - Proactively recommend tech stacks:
-     * 2D Action/Platformer/Arcade -> Phaser 3 (via CDN)
-     * 3D Worlds/First-Person/Space -> Three.js (via CDN)
-     * Visual FX/Particles -> PixiJS
-     * Physics simulation -> Matter.js
-     * Audio & SFX -> Howler.js
-     * Retro/Classic -> HTML5 Canvas 2D
-   - Offer clear, creative choices (e.g. "Do you want high-speed cyberpunk aesthetics or dark atmospheric creature horror?"). Ask 1-2 questions at a time.
-   - Call `save_design_decision(decision=...)` or `remember_creator_preference(preference=...)` when key decisions or preferences are established.
+**The 10-Step Engineering Workflow:**
+1. **Listen & Understand**: Hear the creator's vision, question, or bug report with enthusiasm.
+2. **Inspect Code First (Mandatory Tool-Use)**: Call `read_project_file`, `list_project_files`, or `search_project` to inspect the code before diagnosing or offering code changes.
+3. **Check Diagnostics & Memory**: Run `get_project_summary()` and `validate_project()` to check current architecture, systems, and manifest memory so existing mechanics are preserved.
+4. **Architect the Solution**: Choose the best approach (Phaser 3, Three.js, PixiJS, Matter.js, Howler.js, or Canvas2D) that integrates smoothly with existing code.
+5. **Interview & Offer Choices**: Present 1-2 focused options (e.g. aesthetic style or control feel) rather than overwhelming them.
+6. **Draft Specification to Input Box**: Call `draft_prompt_to_input(prompt=...)` so the complete engineering specification appears in the creator's on-screen command box.
+7. **Confirm with Creator**: Explain what was drafted in voice and ask them to confirm ("build it", "send it", or press Enter).
+8. **Dispatch to Antigravity**: Call `send_prompt_to_antigravity(instruction=...)` when confirmed.
+9. **Converse While Compiling**: Antigravity compiles in the background without blocking voice conversation. Talk about lore, sound effects, or future levels.
+10. **Screenshare Playtesting Loop**: When compilation finishes, invite the creator to play in the preview window and click Screenshare (1080p 2 FPS) so you can watch gameplay live, critique feel, and brainstorm next tweaks together.
 
-2. **Project Inspection & Real-Time Awareness:**
-   - Use your toolbelt: `get_project_summary()`, `list_project_files()`, `read_project_file(path=...)`, `search_project(query=...)`, `get_current_build()`, `validate_project()`.
-   - When the creator asks "What does my game look like under the hood?" or "Why is this behaving strangely?", inspect the files or check validation diagnostics first!
-
-3. **Drafting the Antigravity Engineering Prompt:**
-   - Once the design or bug fix is clear, draft a comprehensive engineering specification.
-   - Call `draft_prompt_to_input(prompt=...)` to populate their on-screen command box.
-   - Tell the creator: "I've drafted the complete specification in your command box. Review it, edit it, or say 'send it' to build it."
-   - If requested, read the prompt aloud.
-
-4. **Sending to Antigravity:**
-   - When the creator confirms ("send it", "build it", or presses Enter), call `send_prompt_to_antigravity(instruction=...)`.
-   - Announce: "Sending to Antigravity now! Compiling in the background."
-
-5. **Chat While Building:**
-   - Antigravity builds in the background without blocking our conversation. Continue discussing lore, sound design, extra levels, or mechanics.
-
-6. **Active Gameplay Observation Loop (Screenshare):**
-   - When the build completes, invite the creator to play in the preview window and click **Screenshare** (streaming at 1080p 2 FPS).
-   - As you receive visual frames of their gameplay, actively critique and advise:
-     * Point out UI/HUD collisions or readability issues
-     * Check enemy attack cadence, player speed, and collision feedback
-     * Suggest particle effects, sound cues, or difficulty tweaks
-     * If you spot a bug or glitch, say so and offer to draft a fix immediately!
-
-7. **Conversational Speech & Automatic Transcript:**
-   - Speak naturally, warmly, and enthusiastically in voice.
-   - You do NOT need to call any tool to write chat messages; your spoken words are automatically transcribed in real time on the creator's screen!
-   - Reserve tool calls exclusively for engineering actions: when the creator wants to build or modify features, call `draft_prompt_to_input` or `send_prompt_to_antigravity`.
+**Conversational Speech & Automatic Transcript:**
+- Speak naturally, warmly, and concisely in voice.
+- You do NOT need to call any tool to write chat messages; your spoken words are automatically transcribed in real time on the creator's screen!
+- Reserve tool calls exclusively for engineering actions and code inspection.
 
 **Current Project Manifest Memory:**
 {manifest_summary}
@@ -1297,15 +1303,22 @@ async def _run_antigravity_builder(slug: str, session_user: dict, api_key: str, 
     """
     build_key = (session_user["id"], slug.lower())
     ACTIVE_PROJECT_BUILDS.add(build_key)
+    request_id = f"req_voice_{int(time.time()*1000)}"
+    build_id = f"bld_voice_{int(time.time()*1000)}"
     try:
         if not ws.closed:
             await ws.send_json({"type": "show_loader", "text": f"Antigravity is coding: {instruction[:60]}..."})
 
         async def _cb(step_type, msg_text):
-            await broadcast_project_log(slug, msg_text, step_type)
+            await broadcast_project_log(
+                slug, msg_text, level=step_type, channel="antigravity",
+                request_id=request_id, build_id=build_id
+            )
 
         res = await ai_engine.process_code_request(
-            api_key, session_user["id"], session_user["username"], slug, instruction, log_callback=_cb, preferred_model=preferred_model
+            api_key, session_user["id"], session_user["username"], slug, instruction,
+            log_callback=_cb, preferred_model=preferred_model,
+            request_id=request_id, build_id=build_id
         )
 
         if not ws.closed:
@@ -1317,9 +1330,15 @@ async def _run_antigravity_builder(slug: str, session_user: dict, api_key: str, 
                 "summary": res["summary"],
                 "content": res["content"],
                 "model_used": res.get("model_used"),
+                "request_id": request_id,
+                "build_id": build_id,
                 "timestamp": int(time.time())
             })
-            await broadcast_project_log(slug, f"[PASS] {res['summary']}", "pass")
+            await broadcast_project_log(
+                slug, f"[PASS] {res['summary']}", level="pass", channel="antigravity",
+                request_id=request_id, build_id=build_id
+            )
+
 
             # Notify Gemini Live voice session that build is complete and ready for playtesting / screenshare
             if session and not ws.closed and ws in ACTIVE_LIVE_SESSIONS:
@@ -1366,7 +1385,13 @@ async def _run_antigravity_builder(slug: str, session_user: dict, api_key: str, 
 
 async def _live_receive_loop(ws: web.WebSocketResponse, slug: str, session, api_key: str, session_user: dict, session_ctx: LiveSessionContext = None):
     """Background listener for streaming audio, thoughts, deltas, and tool calls from Gemini Live across all turns."""
-    current_turn_id = f"turn_{int(time.time() * 1000)}"
+    ai_turn_counter = 0
+    user_turn_counter = 0
+    current_ai_turn_id = f"turn_ai_{ai_turn_counter}_{int(time.time() * 1000)}"
+    current_user_turn_id = f"turn_user_{user_turn_counter}_{int(time.time() * 1000)}"
+    ai_delta_seq = 0
+    user_delta_seq = 0
+    ai_audio_transcript_emitted = False
     user_id_val = int(session_user.get("id") or session_user.get("user_id", 0))
 
     try:
@@ -1409,89 +1434,142 @@ async def _live_receive_loop(ws: web.WebSocketResponse, slug: str, session, api_
                                     if thought_text:
                                         if session_ctx:
                                             await session_ctx.transition_to(LiveState.THINKING)
-                                        await broadcast_project_log(slug, f"[THINKING] {thought_text}", "thinking")
+                                        await broadcast_project_log(slug, f"[THINKING] {thought_text}", "thinking", channel="voice")
 
-                                if part.text:
+                                # Fallback text if output audio transcription is not active
+                                if part.text and not ai_audio_transcript_emitted:
                                     actual_display = session_ctx.actual_model_display if session_ctx else "Gemini Live"
                                     actual_id = session_ctx.actual_model_id if session_ctx else "gemini-3.8-live"
+                                    ai_delta_seq += 1
+                                    evt_id = f"evt_ai_{int(time.time()*1000)}_{ai_delta_seq}"
                                     if not ws.closed:
                                         await ws.send_json({
                                             "type": "ai_transcript_delta",
-                                            "turn_id": current_turn_id,
+                                            "event_id": evt_id,
+                                            "turn_id": current_ai_turn_id,
                                             "speaker": "ai",
                                             "delta": part.text,
+                                            "sequence": ai_delta_seq,
                                             "model": actual_display,
                                             "model_id": actual_id,
-                                            "is_final": False
-                                        })
-                                        await ws.send_json({
-                                            "type": "ai_text",
-                                            "text": part.text
+                                            "is_final": False,
+                                            "timestamp": time.time()
                                         })
 
-                        # Real-time spoken voice transcription from Gemini Live:
+                        # Authoritative spoken voice transcription from Gemini Live
                         out_tx = getattr(server_content, "output_transcription", None)
                         if out_tx and getattr(out_tx, "text", None):
                             ai_speech_chunk = out_tx.text
                             if ai_speech_chunk and not ws.closed:
+                                ai_audio_transcript_emitted = True
+                                ai_delta_seq += 1
                                 if session_ctx:
                                     await session_ctx.transition_to(LiveState.SPEAKING)
                                 actual_display = session_ctx.actual_model_display if session_ctx else "Gemini Live"
                                 actual_id = session_ctx.actual_model_id if session_ctx else "gemini-3.8-live"
+                                evt_id = f"evt_ai_{int(time.time()*1000)}_{ai_delta_seq}"
                                 await ws.send_json({
                                     "type": "ai_transcript_delta",
-                                    "turn_id": current_turn_id,
+                                    "event_id": evt_id,
+                                    "turn_id": current_ai_turn_id,
                                     "speaker": "ai",
                                     "delta": ai_speech_chunk,
+                                    "sequence": ai_delta_seq,
                                     "model": actual_display,
                                     "model_id": actual_id,
-                                    "is_final": False
-                                })
-                                await ws.send_json({
-                                    "type": "ai_text",
-                                    "text": ai_speech_chunk
+                                    "is_final": False,
+                                    "timestamp": time.time()
                                 })
 
-                        # Real-time microphone audio transcription from user:
+                        # Authoritative microphone audio transcription from user
                         in_tx = getattr(server_content, "input_transcription", None)
                         if in_tx and getattr(in_tx, "text", None):
                             user_speech_chunk = in_tx.text
                             if user_speech_chunk and not ws.closed:
+                                user_delta_seq += 1
+                                evt_id = f"evt_usr_{int(time.time()*1000)}_{user_delta_seq}"
                                 await ws.send_json({
                                     "type": "user_transcript_delta",
-                                    "turn_id": current_turn_id,
+                                    "event_id": evt_id,
+                                    "turn_id": current_user_turn_id,
                                     "speaker": "user",
                                     "delta": user_speech_chunk,
-                                    "is_final": False
-                                })
-                                await ws.send_json({
-                                    "type": "user_transcription",
-                                    "text": user_speech_chunk
+                                    "sequence": user_delta_seq,
+                                    "is_final": False,
+                                    "timestamp": time.time()
                                 })
                                         
                         if server_content.turn_complete:
                             actual_display = session_ctx.actual_model_display if session_ctx else "Gemini Live"
                             actual_id = session_ctx.actual_model_id if session_ctx else "gemini-3.8-live"
                             if not ws.closed:
+                                ai_delta_seq += 1
                                 await ws.send_json({
                                     "type": "ai_transcript_delta",
-                                    "turn_id": current_turn_id,
+                                    "event_id": f"evt_ai_fin_{int(time.time()*1000)}",
+                                    "turn_id": current_ai_turn_id,
                                     "speaker": "ai",
                                     "delta": "",
+                                    "sequence": ai_delta_seq,
                                     "model": actual_display,
                                     "model_id": actual_id,
-                                    "is_final": True
+                                    "is_final": True,
+                                    "timestamp": time.time()
                                 })
-                                await ws.send_json({"type": "ai_turn_complete"})
+                                if user_delta_seq > 0:
+                                    user_delta_seq += 1
+                                    await ws.send_json({
+                                        "type": "user_transcript_delta",
+                                        "event_id": f"evt_usr_fin_{int(time.time()*1000)}",
+                                        "turn_id": current_user_turn_id,
+                                        "speaker": "user",
+                                        "delta": "",
+                                        "sequence": user_delta_seq,
+                                        "is_final": True,
+                                        "timestamp": time.time()
+                                    })
+                                await ws.send_json({
+                                    "type": "ai_turn_complete",
+                                    "turn_id": current_ai_turn_id
+                                })
                             if session_ctx:
                                 await session_ctx.transition_to(LiveState.LISTENING)
-                            current_turn_id = f"turn_{int(time.time() * 1000)}"
+                            
+                            ai_turn_counter += 1
+                            user_turn_counter += 1
+                            current_ai_turn_id = f"turn_ai_{ai_turn_counter}_{int(time.time() * 1000)}"
+                            current_user_turn_id = f"turn_user_{user_turn_counter}_{int(time.time() * 1000)}"
+                            ai_delta_seq = 0
+                            user_delta_seq = 0
+                            ai_audio_transcript_emitted = False
 
                         if getattr(server_content, "interrupted", False):
                             if session_ctx:
                                 await session_ctx.transition_to(LiveState.INTERRUPTED)
                             if not ws.closed:
-                                await ws.send_json({"type": "ai_interrupted"})
+                                await ws.send_json({
+                                    "type": "ai_interrupted",
+                                    "turn_id": current_ai_turn_id
+                                })
+                                await ws.send_json({
+                                    "type": "ai_transcript_delta",
+                                    "event_id": f"evt_ai_intr_{int(time.time()*1000)}",
+                                    "turn_id": current_ai_turn_id,
+                                    "speaker": "ai",
+                                    "delta": "",
+                                    "sequence": ai_delta_seq + 1,
+                                    "model": session_ctx.actual_model_display if session_ctx else "Gemini Live",
+                                    "model_id": session_ctx.actual_model_id if session_ctx else "gemini-3.8-live",
+                                    "is_final": True,
+                                    "timestamp": time.time()
+                                })
+                            ai_turn_counter += 1
+                            user_turn_counter += 1
+                            current_ai_turn_id = f"turn_ai_{ai_turn_counter}_{int(time.time() * 1000)}"
+                            current_user_turn_id = f"turn_user_{user_turn_counter}_{int(time.time() * 1000)}"
+                            ai_delta_seq = 0
+                            user_delta_seq = 0
+                            ai_audio_transcript_emitted = False
 
                         # Handle Extended Thinking interaction lifecycle (IN_PROGRESS vs IDLE)
                         int_status = getattr(server_content, "interaction_status", None) or getattr(server_content, "interactionStatus", None)
@@ -1500,6 +1578,7 @@ async def _live_receive_loop(ws: web.WebSocketResponse, slug: str, session, api_
                                 "type": "interaction_status",
                                 "status": str(int_status)
                             })
+
 
                     # Handle tool calls (Architect invoking Antigravity tools)
                     tool_call = response.tool_call
@@ -1615,7 +1694,12 @@ async def _live_receive_loop(ws: web.WebSocketResponse, slug: str, session, api_
                                     return {"success": True, "preference": pref_str}
 
                                 else:
-                                    return {"success": True, "message": f"Tool '{fc.name}' acknowledged"}
+                                    return {
+                                        "success": False,
+                                        "error_type": "UNSUPPORTED_TOOL",
+                                        "message": f"Tool '{fc.name}' is not recognized or supported by Yulya Studio.",
+                                        "recoverable": True
+                                    }
 
                             # Execute tool call under safe execution contract with per-tool timeout
                             result_data = await safe_execute_tool(
@@ -1795,32 +1879,28 @@ async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
                         # Creator finished speaking turn (signals turn complete to Gemini Live)
                         if ws in ACTIVE_LIVE_SESSIONS:
                             live_sess = ACTIVE_LIVE_SESSIONS[ws]["session"]
-                            transcript = data.get("transcript", "").strip()
                             try:
-                                if transcript:
-                                    # Send recognized speech transcript to guarantee 100% accurate comprehension
-                                    parts = []
-                                    session_ctx = ACTIVE_LIVE_SESSIONS[ws].get("context")
-                                    attach_frame = False
+                                session_ctx = ACTIVE_LIVE_SESSIONS[ws].get("context")
+                                attach_frame = False
+                                if session_ctx and session_ctx.screenshare:
+                                    attach_frame = session_ctx.screenshare.should_attach_to_turn(freshness_sec=2.5)
+                                elif slot.get("latest_screen_frame"):
+                                    attach_frame = True
+
+                                if attach_frame and slot.get("latest_screen_frame"):
+                                    parts = [types.Part.from_bytes(data=slot["latest_screen_frame"], mime_type="image/jpeg")]
                                     if session_ctx and session_ctx.screenshare:
-                                        attach_frame = session_ctx.screenshare.should_attach_to_turn(freshness_sec=2.5)
-                                    elif slot.get("latest_screen_frame"):
-                                        attach_frame = True
-
-                                    if attach_frame and slot.get("latest_screen_frame"):
-                                        parts.append(types.Part.from_bytes(data=slot["latest_screen_frame"], mime_type="image/jpeg"))
-                                        if session_ctx and session_ctx.screenshare:
-                                            session_ctx.screenshare.mark_frame_sent_to_gemini()
-
-                                    parts.append(types.Part.from_text(text=transcript))
+                                        session_ctx.screenshare.mark_frame_sent_to_gemini()
                                     await live_sess.send_client_content(
                                         turns=[types.Content(role="user", parts=parts)],
                                         turn_complete=True
                                     )
                                 else:
+                                    # Audio was streamed via realtime chunks; signal completion of that audio turn
                                     await live_sess.send_client_content(turn_complete=True)
                             except Exception as e:
-                                print(f"[LIVE] Error sending turn_complete: {e}")
+                                print(f"[LIVE] Error sending turn_complete on audio_end: {e}")
+
 
                     elif msg_type == "live_text":
                         # Creator sends text directly to Gemini Live session
@@ -2065,14 +2145,44 @@ async def broadcast_project_update(slug: str, message: dict):
                 except Exception:
                     pass
 
-async def broadcast_project_log(slug: str, message_text: str, level: str = "info"):
+LOG_EVENT_SEQ = 0
+
+async def broadcast_project_log(
+    slug: str,
+    message_text: str,
+    level: str = "info",
+    channel: str = None,
+    request_id: str = None,
+    build_id: str = None
+):
+    global LOG_EVENT_SEQ
+    LOG_EVENT_SEQ += 1
     if slug in ACTIVE_STUDIO_WS:
         slot = ACTIVE_STUDIO_WS[slug]
+        
+        # Determine explicit channel if not passed
+        if not channel:
+            lvl_lower = (level or "info").lower()
+            msg_upper = message_text.upper()
+            if lvl_lower in ("thinking", "diff", "replace_content", "verify", "pass", "fail", "architect", "read_file", "repair") or any(msg_upper.startswith(p) for p in ["[THINKING]", "[DIFF]", "[REPLACE_CONTENT]", "[VERIFY]", "[PASS]", "[FAIL]", "[ARCHITECT]", "[READ_FILE]", "[REPAIR]", "[MANIFEST]"]):
+                channel = "antigravity"
+            elif lvl_lower in ("voice", "call", "live") or any(msg_upper.startswith(p) for p in ["[VOICE]", "[CALL]", "[LIVE]", "[LIVE_AI]"]):
+                channel = "voice"
+            elif lvl_lower in ("error", "warning") or any(msg_upper.startswith(p) for p in ["[ERROR]", "[WARNING]", "[LIVE_ERROR]"]):
+                channel = "terminal"
+            else:
+                channel = "terminal"
+
         msg = {
             "type": "log",
-            "message": message_text,
+            "event_id": f"log_{int(time.time()*1000)}_{LOG_EVENT_SEQ}",
+            "channel": channel,
             "level": level,
-            "timestamp": int(time.time())
+            "message": message_text,
+            "timestamp": int(time.time()),
+            "sequence": LOG_EVENT_SEQ,
+            "request_id": request_id,
+            "build_id": build_id
         }
         for client in list(slot["creator"]):
             if not client.closed:
@@ -2080,6 +2190,7 @@ async def broadcast_project_log(slug: str, message_text: str, level: str = "info
                     await client.send_json(msg)
                 except Exception:
                     pass
+
 
 # --- Background Idle Monitor (Section 22) ---
 

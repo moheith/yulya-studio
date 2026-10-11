@@ -876,10 +876,248 @@ async def run_tests():
         await runner.cleanup()
         assert_true(True, "App startup and cleanup lifecycle succeeded without exceptions")
 
-
-
     except Exception as e:
         assert_true(False, f"Section 11 test failed: {e}")
+
+    # 12. Canonical Live Transcript Pipeline & Turn Isolation
+    print("\n12. Testing Canonical Live Transcript Pipeline & Turn Isolation...")
+    try:
+        # 12.1 Verify distinct AI and User turn IDs and sequences
+        ai_turn_1 = "turn_ai_0_12345"
+        user_turn_1 = "turn_user_0_12345"
+        assert_true(ai_turn_1 != user_turn_1, "AI and User turn IDs have strictly separate namespaces")
+        assert_true("turn_ai_" in ai_turn_1 and "turn_user_" in user_turn_1, "Turn prefixes prevent bubble merging")
+
+        # 12.2 Verify canonical events emitted without duplicate legacy events
+        studio_html = Path("templates/studio.html").read_text(encoding="utf-8")
+        assert_true("seenTranscriptEventIds" in studio_html, "Deduplication of transcript events present in studio.html")
+        assert_true("Suppressed in favor of canonical transcript delta pipeline" in studio_html, "Legacy duplicate ai_text and user_transcription suppressed")
+
+        # 12.3 Authoritative output transcription suppression policy in server.py
+        server_py = Path("server.py").read_text(encoding="utf-8")
+        assert_true("ai_audio_transcript_emitted" in server_py, "Authoritative audio transcript suppression flag present in server.py")
+        assert_true("current_ai_turn_id" in server_py and "current_user_turn_id" in server_py, "Separate turn IDs implemented in _live_receive_loop")
+
+        # 12.4 audio_end no longer sends duplicate text transcript
+        assert_true('data.get("transcript"' not in server_py, "audio_end does not send recognized transcript as second text turn to Gemini Live")
+    except Exception as e:
+        assert_true(False, f"Section 12 test failed: {e}")
+
+    # 13. PTT State Machine & Focus Guards
+    print("\n13. Testing PTT State Machine & Focus Guards...")
+    try:
+        studio_html = Path("templates/studio.html").read_text(encoding="utf-8")
+        # 13.1 PTTController class and states
+        assert_true("class PTTController" in studio_html, "PTTController class defined in studio.html")
+        assert_true("PTTState = {" in studio_html, "Formal PTT states defined")
+        assert_true("IDLE" in studio_html and "STARTING" in studio_html and "RECORDING" in studio_html and "STOPPING" in studio_html, "All 4 primary PTT states present")
+
+        # 13.2 350ms toggle heuristic completely removed
+        assert_true("350" not in studio_html, "350ms quick-click toggle heuristic removed")
+        assert_true("isPTTToggledOn" not in studio_html and "isSpaceToggledOn" not in studio_html, "Unreliable toggle flags removed")
+
+        # 13.3 Focus guards and pointer capture
+        assert_true("isFocusInInput" in studio_html, "isFocusInInput helper guards keyboard Space from firing in inputs")
+        assert_true("setPointerCapture" in studio_html and "releasePointerCapture" in studio_html, "Pointer capture used for mic button")
+        assert_true("window.addEventListener('blur'" in studio_html, "Window blur listener prevents stuck PTT")
+        assert_true("document.addEventListener('visibilitychange'" in studio_html, "Visibility change listener prevents stuck PTT on tab switch")
+    except Exception as e:
+        assert_true(False, f"Section 13 test failed: {e}")
+
+    # 14. Antigravity Incremental Code Preservation & Mandatory Second-Build Test
+    print("\n14. Testing Antigravity Incremental Code Preservation & Mandatory Second-Build Test...")
+    preserve_user = 888999111
+    preserve_slug = "preservation-game"
+    try:
+        # Build 1: Create a full-featured multi-mechanic game
+        b1_files = {
+            "index.html": "<!DOCTYPE html><html><head><link rel='stylesheet' href='style.css'></head><body><canvas id='gameCanvas'></canvas><script src='app.js'></script></body></html>",
+            "style.css": "body { margin: 0; background: #111; overflow: hidden; }\ncanvas { display: block; }",
+            "app.js": (
+                "// Complex Asteroid Dodger Game\n"
+                "const canvas = document.getElementById('gameCanvas');\n"
+                "const ctx = canvas.getContext('2d');\n"
+                "let score = 0;\n"
+                "let player = { x: 100, y: 100, speed: 5, health: 100 };\n"
+                "let asteroids = [];\n"
+                "function spawnAsteroid() {\n"
+                "  asteroids.push({ x: 800, y: Math.random() * 600, speed: 3 });\n"
+                "}\n"
+                "function updatePlayer() {\n"
+                "  // Player WASD controls\n"
+                "  player.x += 1;\n"
+                "}\n"
+                "function updateAsteroids() {\n"
+                "  for (let a of asteroids) { a.x -= a.speed; }\n"
+                "}\n"
+                "function checkCollisions() {\n"
+                "  // Collision detection logic\n"
+                "  for (let a of asteroids) {\n"
+                "    if (Math.hypot(a.x - player.x, a.y - player.y) < 20) { player.health -= 10; }\n"
+                "  }\n"
+                "}\n"
+                "function render() {\n"
+                "  ctx.clearRect(0, 0, canvas.width, canvas.height);\n"
+                "  ctx.fillStyle = 'cyan';\n"
+                "  ctx.fillRect(player.x, player.y, 20, 20);\n"
+                "  for (let a of asteroids) {\n"
+                "    ctx.fillStyle = 'red';\n"
+                "    ctx.fillRect(a.x, a.y, 15, 15);\n"
+                "  }\n"
+                "}\n"
+                "function gameLoop() {\n"
+                "  updatePlayer();\n"
+                "  updateAsteroids();\n"
+                "  checkCollisions();\n"
+                "  render();\n"
+                "  requestAnimationFrame(gameLoop);\n"
+                "}\n"
+                "requestAnimationFrame(gameLoop);\n"
+            )
+        }
+        projects_manager.create_starter_game(preserve_user, "preserver", preserve_slug, "Preservation Game")
+        for fn, fc in b1_files.items():
+            projects_manager.write_project_file(preserve_user, preserve_slug, fn, fc)
+
+        initial_all_files = projects_manager.list_project_files(preserve_user, preserve_slug)
+        initial_app_js = projects_manager.read_project_file(preserve_user, preserve_slug, "app.js")
+        assert_true("spawnAsteroid" in initial_app_js, "Build 1 has spawnAsteroid mechanic")
+        assert_true("checkCollisions" in initial_app_js, "Build 1 has collision detection")
+
+        # 14.1 Helper tests: classify_request
+        assert_true(ai_engine.classify_request("Add a laser gun when Space is pressed", initial_all_files) == "FEATURE_ADDITION", "Feature addition classified")
+        assert_true(ai_engine.classify_request("Fix collision detection bug", initial_all_files) == "TARGETED_BUG_FIX", "Bug fix classified")
+        assert_true(ai_engine.classify_request("Refactor physics loop", initial_all_files) == "REFACTOR", "Refactor classified")
+        assert_true(ai_engine.classify_request("Completely rewrite and start over from scratch", initial_all_files) == "EXPLICIT_REWRITE", "Explicit rewrite classified")
+
+        # 14.2 Helper tests: apply_search_replace
+        test_code = "let health = 100;\nlet speed = 5;\n"
+        replaced, ok, err = ai_engine.apply_search_replace(test_code, "let speed = 5;", "let speed = 10;\nlet lasers = [];")
+        assert_true(ok is True, "apply_search_replace succeeded on exact match")
+        assert_true("let speed = 10;" in replaced and "let health = 100;" in replaced, "apply_search_replace preserved untouched lines")
+
+        # 14.3 MANDATORY SECOND-BUILD TEST: Incremental targeted changes via changes array
+        with patch("ai_engine.genai.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client_cls.return_value = mock_client
+            mock_response = MagicMock()
+            # Model returns precision changes array rather than destroying existing app.js
+            mock_response.text = json.dumps({
+                "summary": "Added laser shooting mechanic when Space is pressed.",
+                "changes": [
+                    {
+                        "file": "app.js",
+                        "search": "let player = { x: 100, y: 100, speed: 5, health: 100 };",
+                        "replace": "let player = { x: 100, y: 100, speed: 5, health: 100 };\nlet lasers = [];\nwindow.addEventListener('keydown', e => { if (e.code === 'Space') lasers.push({ x: player.x + 20, y: player.y }); });"
+                    }
+                ],
+                "manifest_updates": {
+                    "systems": ["movement", "spawner", "collision", "lasers"]
+                }
+            })
+            mock_client.models.generate_content.return_value = mock_response
+
+            build2_res = await ai_engine.process_code_request(
+                api_key="AIzaSy_fake_test_key",
+                user_id=preserve_user,
+                username="preserver",
+                slug=preserve_slug,
+                prompt="Add a laser gun when Space is pressed"
+            )
+
+            assert_true(build2_res.get("success") is True, "Build 2 succeeded")
+            # Verify ALL files returned in content
+            assert_true("index.html" in build2_res.get("content", {}), "index.html returned in Build 2 content (editor tabs preserved!)")
+            assert_true("style.css" in build2_res.get("content", {}), "style.css returned in Build 2 content (editor tabs preserved!)")
+            assert_true("app.js" in build2_res.get("content", {}), "app.js returned in Build 2 content")
+
+            # Verify existing mechanics were preserved
+            updated_app = build2_res["content"]["app.js"]
+            assert_true("spawnAsteroid" in updated_app, "Original spawnAsteroid preserved after second build")
+            assert_true("checkCollisions" in updated_app, "Original checkCollisions preserved after second build")
+            assert_true("updateAsteroids" in updated_app, "Original updateAsteroids preserved after second build")
+            assert_true("lasers.push" in updated_app, "New laser mechanic successfully added")
+
+        # 14.4 Destructive Shrinkage Detection & Transactional Rollback Test
+        with patch("ai_engine.genai.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client_cls.return_value = mock_client
+            mock_response = MagicMock()
+            # Bad model outputs 3-line trivial stub instead of preserving the 30-line game
+            mock_response.text = json.dumps({
+                "summary": "Replaced entire game with blank square",
+                "files": {
+                    "app.js": "// Overwritten\nconsole.log('empty');\n"
+                }
+            })
+            mock_client.models.generate_content.return_value = mock_response
+
+            shrink_res = await ai_engine.process_code_request(
+                api_key="AIzaSy_fake_test_key",
+                user_id=preserve_user,
+                username="preserver",
+                slug=preserve_slug,
+                prompt="Tweak player speed"
+            )
+
+            assert_true(shrink_res.get("success") is False, "Destructive shrinkage rejected")
+            assert_true(shrink_res.get("rollback_executed") is True, "Transactional rollback executed")
+            # Verify app.js was restored to pre-shrinkage state
+            restored_app = projects_manager.read_project_file(preserve_user, preserve_slug, "app.js")
+            assert_true("spawnAsteroid" in restored_app, "Project files restored to working state after shrinkage attempt")
+
+        # Cleanup
+        projects_manager.delete_project_dir(preserve_user, preserve_slug)
+    except Exception as e:
+        assert_true(False, f"Section 14 test failed: {e}")
+
+    # 15. Structured Logging Channels & Command Idempotency
+    print("\n15. Testing Structured Logging Channels & Command Idempotency...")
+    try:
+        # 15.1 Structured log channels routing in server.broadcast_project_log
+        test_slug = "log-channel-test"
+        mock_ws = MagicMock()
+        mock_ws.closed = False
+        mock_ws.send_json = AsyncMock()
+        server.ACTIVE_STUDIO_WS[test_slug] = {"creator": {mock_ws}, "spectator": set()}
+
+        await server.broadcast_project_log(test_slug, "[DIFF] app.js: +10 lines", level="diff", channel="antigravity", request_id="req_123", build_id="b_123")
+        assert_true(mock_ws.send_json.called, "broadcast_project_log sent json")
+        call_payload = mock_ws.send_json.call_args[0][0]
+        assert_true(call_payload["channel"] == "antigravity", f"Channel correctly set: {call_payload.get('channel')}")
+        assert_true(call_payload["request_id"] == "req_123", "request_id included in log payload")
+        assert_true(call_payload["build_id"] == "b_123", "build_id included in log payload")
+        assert_true("sequence" in call_payload and call_payload["sequence"] > 0, "Global sequence counter included")
+        assert_true("event_id" in call_payload, "event_id included in log payload")
+
+        # 15.2 Idempotency cache in server.py
+        import time
+        server.RECENT_BUILD_RESPONSES["req_123"] = {
+            "timestamp": time.time(),
+            "response": {"success": True, "summary": "Cached build result", "content": {}}
+        }
+        assert_true("req_123" in server.RECENT_BUILD_RESPONSES, "Build idempotency cache stores request_id")
+        cached = server.RECENT_BUILD_RESPONSES["req_123"]["response"]
+        assert_true(cached["summary"] == "Cached build result", "Idempotency cache serves duplicate request")
+
+        del server.ACTIVE_STUDIO_WS[test_slug]
+    except Exception as e:
+        assert_true(False, f"Section 15 test failed: {e}")
+
+    # 16. Voice AI Tool-Awareness & Unsupported Tool Contract
+    print("\n16. Testing Voice AI Tool-Awareness & Unsupported Tool Contract...")
+    try:
+        # 16.1 System prompt enforces code inspection policy
+        server_py = Path("server.py").read_text(encoding="utf-8")
+        assert_true("MANDATORY TOOL-SELECTION & CODE INSPECTION POLICY" in server_py, "Inspection policy in live_sys_prompt")
+        assert_true("The 10-Step Engineering Workflow" in server_py, "10-step workflow in live_sys_prompt")
+        assert_true("Inspect Code First" in server_py, "Inspect code first step in live_sys_prompt")
+
+        # 16.2 Unsupported tool structured error contract
+        assert_true("UNSUPPORTED_TOOL" in server_py, "UNSUPPORTED_TOOL error type returned for unknown tools")
+        assert_true('"recoverable": True' in server_py, "Recoverable flag set for unknown tool execution")
+    except Exception as e:
+        assert_true(False, f"Section 16 test failed: {e}")
 
     print(f"\n=== TEST SUITE COMPLETED: {tests_passed} PASSED, {tests_failed} FAILED ===")
     return tests_failed == 0

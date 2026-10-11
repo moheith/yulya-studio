@@ -1863,9 +1863,18 @@
 
     // --- Chat Tab Feed Management (Turn-Aware Delta Assembly) ---
     const activeTurns = {}; // { [turn_id]: { row, header, bubble, text, speaker, model, time } }
+    const seenTranscriptEventIds = new Set();
 
     function handleTranscriptDelta(data) {
       if (!data) return;
+      if (data.event_id && seenTranscriptEventIds.has(data.event_id)) {
+        return; // Deduplicate duplicate packet transmission
+      }
+      if (data.event_id) {
+        seenTranscriptEventIds.add(data.event_id);
+        if (seenTranscriptEventIds.size > 2000) seenTranscriptEventIds.clear();
+      }
+
       const turnId = data.turn_id || (data.speaker === 'user' ? 'legacy_user_turn' : 'legacy_ai_turn');
       const speaker = data.speaker || 'ai';
       const delta = data.delta || '';
@@ -2305,6 +2314,8 @@
     }
 
     // --- WebSocket Link ---
+    const seenLogEventIds = new Set();
+
     function connectWS() {
       const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = `${proto}//${window.location.host}/ws/studio?slug=${ACTIVE_SLUG}&role=creator`;
@@ -2342,20 +2353,28 @@
             const data = JSON.parse(event.data);
             
             if (data.type === 'log') {
+              const eventId = data.event_id;
+              if (eventId && seenLogEventIds.has(eventId)) {
+                return; // Deduplicate log packet
+              }
+              if (eventId) {
+                seenLogEventIds.add(eventId);
+                if (seenLogEventIds.size > 2000) seenLogEventIds.clear();
+              }
+
               const msg = data.message || '';
               const lvl = (data.level || 'info').toLowerCase();
-
-              const isAntigravity = (
-                lvl === 'thinking' || lvl === 'diff' || lvl === 'replace_content' ||
-                lvl === 'verify' || lvl === 'pass' || lvl === 'fail' ||
-                msg.startsWith('[THINKING]') || msg.startsWith('[DIFF]') ||
-                msg.startsWith('[REPLACE_CONTENT]') || msg.startsWith('[VERIFY]') ||
-                msg.startsWith('[PASS]') || msg.startsWith('[FAIL]') ||
-                msg.startsWith('[ARCHITECT_BUILD]') ||
-                (msg.startsWith('[USER]') && !msg.startsWith('[USER] Spoken:'))
+              const channel = data.channel || (
+                (lvl === 'thinking' || lvl === 'diff' || lvl === 'replace_content' ||
+                 lvl === 'verify' || lvl === 'pass' || lvl === 'fail' ||
+                 msg.startsWith('[THINKING]') || msg.startsWith('[DIFF]') ||
+                 msg.startsWith('[REPLACE_CONTENT]') || msg.startsWith('[VERIFY]') ||
+                 msg.startsWith('[PASS]') || msg.startsWith('[FAIL]') ||
+                 msg.startsWith('[ARCHITECT_BUILD]')) ? 'antigravity' :
+                (lvl === 'voice' || msg.startsWith('[VOICE]')) ? 'voice' : 'terminal'
               );
 
-              if (isAntigravity) {
+              if (channel === 'antigravity') {
                 logAntigravity(msg, lvl);
                 if (lvl === 'thinking') {
                   updateAntigravityLoader('Antigravity is planning code architecture...');
@@ -2375,6 +2394,11 @@
               showAntigravityLoader(data.text || 'Antigravity is coding your game...');
             } else if (data.type === 'hide_loader') {
               hideAntigravityLoader();
+              isBuildInFlight = false;
+              const sendBtn = document.getElementById('sendBtn');
+              const cmdInput = document.getElementById('commandInput');
+              if (sendBtn) sendBtn.disabled = false;
+              if (cmdInput) cmdInput.disabled = false;
             } else if (data.type === 'set_command_input') {
               const input = document.getElementById('commandInput');
               const wrap = document.querySelector('.command-input-wrap');
@@ -2404,10 +2428,8 @@
               handleTranscriptDelta(data);
             } else if (data.type === 'user_transcript_delta') {
               handleTranscriptDelta(data);
-            } else if (data.type === 'ai_text') {
-              appendAiChatText(data.text);
-            } else if (data.type === 'user_transcription') {
-              appendUserChatText(data.text);
+            } else if (data.type === 'ai_text' || data.type === 'user_transcription') {
+              // Suppressed in favor of canonical transcript delta pipeline
             } else if (data.type === 'ai_turn_complete') {
               if (isAiSpeakingVoice) {
                 isAiSpeakingVoice = false;
@@ -2519,6 +2541,11 @@
                 setLiveStatus(voiceMode === 'continuous' ? 'Continuous Voice Active' : (formatVoiceModelName(selectedVoiceModel) + ' Ready'), voiceMode === 'continuous' ? 'listening' : 'online');
               }
             } else if (data.type === 'code_update') {
+              isBuildInFlight = false;
+              const sendBtn = document.getElementById('sendBtn');
+              const cmdInput = document.getElementById('commandInput');
+              if (sendBtn) sendBtn.disabled = false;
+              if (cmdInput) cmdInput.disabled = false;
               hideAntigravityLoader();
               logAntigravity(`[PASS] ${data.summary}`, 'pass');
               if (data.model_used) {
@@ -2780,143 +2807,155 @@
       }
     }
 
-    // --- Push-to-Talk Handling (Hold Space or Click to Talk) ---
-    const pttBtn = document.getElementById('pttBtn');
-    let pttPressStartTime = 0;
-    let isPTTToggledOn = false;
-    let micInitPromise = null;
+    // --- Push-to-Talk Handling (Hold Space or Mic Button to Talk) ---
+    const PTTState = {
+      IDLE: 'IDLE',
+      STARTING: 'STARTING',
+      RECORDING: 'RECORDING',
+      STOPPING: 'STOPPING',
+      ERROR: 'ERROR'
+    };
 
-    async function activatePTT() {
-      if (isPTTActive || voiceMode !== 'ptt') return;
-
-      if (!isLiveConnected) {
-        ToastManager.show('Please click "Connect Live AI" at the top before holding Space to talk.', 'info');
-        return;
+    class PTTController {
+      constructor() {
+        this.state = PTTState.IDLE;
+        this.btn = document.getElementById('pttBtn');
+        this.label = document.getElementById('pttLabel');
+        this.micInitPromise = null;
+        this.isSpacePressed = false;
+        this.isPointerPressed = false;
       }
 
-      isPTTActive = true;
-      isListening = true;
-      currentSpeechTranscript = '';
-      if (pttBtn) pttBtn.classList.add('recording');
-      const label = document.getElementById('pttLabel');
-      if (label) label.textContent = 'Listening... (Click/Release to Send)';
-
-      logTerminal('[VOICE] User started speaking...', 'voice');
-
-      // Immediately stop any AI voice audio to allow clean interruption
-      liveAudioPlayer.stop();
-      liveAudioPlayer.init();
-
-      // Start Web Speech API recognizer
-      if (speechRecognizer) {
-        try {
-          speechRecognizer.start();
-          isSpeechRecognitionActive = true;
-        } catch (e) {}
+      canStart() {
+        return this.state === PTTState.IDLE && voiceMode === 'ptt';
       }
 
-      micInitPromise = startMicrophone();
-      const ok = await micInitPromise;
-      if (ok && isPTTActive) {
-        setLiveStatus('Listening to you...', 'listening');
-        animateWaveform('listening');
-      }
-    }
-
-    async function deactivatePTT() {
-      if (!isPTTActive || voiceMode !== 'ptt') return;
-
-      // If microphone is still initializing, wait for it so audio stream finishes cleanly
-      if (micInitPromise) {
-        try { await micInitPromise; } catch (e) {}
-        micInitPromise = null;
+      canStop() {
+        return this.state === PTTState.STARTING || this.state === PTTState.RECORDING;
       }
 
-      isPTTActive = false;
-      isListening = false;
-      isPTTToggledOn = false;
-      isSpaceToggledOn = false;
-      if (pttBtn) pttBtn.classList.remove('recording');
-      const label = document.getElementById('pttLabel');
-      if (label) label.textContent = 'Hold Space to Talk';
-      stopWaveform();
+      async start() {
+        if (!this.canStart()) return;
 
-      if (speechRecognizer && isSpeechRecognitionActive) {
-        try {
-          speechRecognizer.stop();
-        } catch (e) {}
-        isSpeechRecognitionActive = false;
-      }
-
-      const spokenText = currentSpeechTranscript.trim();
-      if (spokenText) {
-        addChatMessage('user', spokenText);
-      }
-      logTerminal(spokenText ? `[VOICE] Spoken: "${spokenText}"` : '[VOICE] User finished speaking.', 'voice');
-
-      if (isLiveConnected) {
-        setLiveStatus('Extended Thinking (High)...', 'thinking');
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'audio_end',
-            transcript: spokenText
-          }));
-        }
-      }
-      currentSpeechTranscript = '';
-    }
-
-    if (pttBtn) {
-      pttBtn.addEventListener('mousedown', (e) => {
         if (!isLiveConnected) {
           ToastManager.show('Please click "Connect Live AI" at the top before talking.', 'info');
           return;
         }
-        pttPressStartTime = Date.now();
-        if (isPTTToggledOn) {
-          deactivatePTT();
-        } else {
-          activatePTT();
+
+        this.state = PTTState.STARTING;
+        isPTTActive = true;
+        isListening = true;
+        currentSpeechTranscript = '';
+
+        if (this.btn) this.btn.classList.add('recording');
+        if (this.label) this.label.textContent = 'Listening... (Release to Send)';
+
+        logTerminal('[VOICE] User started speaking...', 'voice');
+
+        // Immediately stop any AI voice audio to allow clean interruption
+        liveAudioPlayer.stop();
+        liveAudioPlayer.init();
+
+        // Auxiliary recognizer (optional client hint)
+        if (speechRecognizer) {
+          try {
+            speechRecognizer.start();
+            isSpeechRecognitionActive = true;
+          } catch (e) {}
+        }
+
+        this.micInitPromise = startMicrophone();
+        const ok = await this.micInitPromise;
+        if (ok && isPTTActive && (this.state === PTTState.STARTING || this.state === PTTState.RECORDING)) {
+          this.state = PTTState.RECORDING;
+          setLiveStatus('Listening to you...', 'listening');
+          animateWaveform('listening');
+        } else if (!ok) {
+          this.state = PTTState.ERROR;
+          this.stop();
+        }
+      }
+
+      async stop() {
+        if (!this.canStop() && this.state !== PTTState.ERROR) return;
+
+        this.state = PTTState.STOPPING;
+
+        if (this.micInitPromise) {
+          try { await this.micInitPromise; } catch (e) {}
+          this.micInitPromise = null;
+        }
+
+        isPTTActive = false;
+        isListening = false;
+        if (this.btn) this.btn.classList.remove('recording');
+        if (this.label) this.label.textContent = 'Hold Space to Talk';
+        stopWaveform();
+
+        if (speechRecognizer && isSpeechRecognitionActive) {
+          try {
+            speechRecognizer.stop();
+          } catch (e) {}
+          isSpeechRecognitionActive = false;
+        }
+
+        // Canonical Voice Architecture: do NOT addChatMessage here!
+        // Gemini Live's user_transcript_delta handles user speech bubbles authoritatively.
+        logTerminal('[VOICE] User finished speaking.', 'voice');
+
+        if (isLiveConnected) {
+          setLiveStatus('Extended Thinking (High)...', 'thinking');
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            // Signal audio turn complete without sending duplicate transcript as text turn!
+            ws.send(JSON.stringify({ type: 'audio_end' }));
+          }
+        }
+        currentSpeechTranscript = '';
+        this.state = PTTState.IDLE;
+      }
+    }
+
+    const pttController = new PTTController();
+
+    function isFocusInInput(target) {
+      if (!target) target = document.activeElement;
+      if (!target) return false;
+      const tag = target.tagName;
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON' || target.isContentEditable;
+    }
+
+    // Pointer events for Mic Button (True Hold-to-Talk with pointer capture)
+    if (pttController.btn) {
+      pttController.btn.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) return;
+        pttController.isPointerPressed = true;
+        try { pttController.btn.setPointerCapture(e.pointerId); } catch (err) {}
+        pttController.start();
+      });
+
+      pttController.btn.addEventListener('pointerup', (e) => {
+        if (pttController.isPointerPressed) {
+          pttController.isPointerPressed = false;
+          try { pttController.btn.releasePointerCapture(e.pointerId); } catch (err) {}
+          pttController.stop();
         }
       });
 
-      pttBtn.addEventListener('mouseup', (e) => {
-        if (!isLiveConnected || !isPTTActive) return;
-        const duration = Date.now() - pttPressStartTime;
-        if (duration >= 350) {
-          // Held down like a traditional walkie-talkie
-          deactivatePTT();
-        } else {
-          // Quick click! Keep recording open in toggle mode so user can speak comfortably
-          isPTTToggledOn = true;
-          const label = document.getElementById('pttLabel');
-          if (label) label.textContent = 'Listening... (Click to Send)';
-        }
-      });
-
-      pttBtn.addEventListener('mouseleave', (e) => {
-        if (isPTTActive && !isPTTToggledOn) {
-          deactivatePTT();
+      pttController.btn.addEventListener('pointercancel', (e) => {
+        if (pttController.isPointerPressed) {
+          pttController.isPointerPressed = false;
+          try { pttController.btn.releasePointerCapture(e.pointerId); } catch (err) {}
+          pttController.stop();
         }
       });
     }
 
-    let spacePressStartTime = 0;
-    let isSpaceToggledOn = false;
-
+    // Keyboard Space Hold-to-Talk (Guarded against text inputs & contenteditable)
     window.addEventListener('keydown', (e) => {
-      if (e.code === 'Space' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA' && !e.repeat && voiceMode === 'ptt') {
+      if (e.code === 'Space' && !e.repeat && !isFocusInInput(e.target) && voiceMode === 'ptt') {
         e.preventDefault();
-        if (!isLiveConnected) {
-          ToastManager.show('Please click "Connect Live AI" at the top before holding Space to talk.', 'info');
-          return;
-        }
-        spacePressStartTime = Date.now();
-        if (isSpaceToggledOn) {
-          deactivatePTT();
-        } else {
-          activatePTT();
-        }
+        pttController.isSpacePressed = true;
+        pttController.start();
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
@@ -2925,23 +2964,34 @@
     });
 
     window.addEventListener('keyup', (e) => {
-      if (e.code === 'Space' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA' && voiceMode === 'ptt') {
+      if (e.code === 'Space' && pttController.isSpacePressed && voiceMode === 'ptt') {
         e.preventDefault();
-        if (!isLiveConnected || !isPTTActive) return;
-        const duration = Date.now() - spacePressStartTime;
-        if (duration >= 350) {
-          deactivatePTT();
-        } else {
-          isSpaceToggledOn = true;
-          const label = document.getElementById('pttLabel');
-          if (label) label.textContent = 'Listening... (Press Space to Send)';
-        }
+        pttController.isSpacePressed = false;
+        pttController.stop();
+      }
+    });
+
+    // Window blur & document visibility guards (prevent stuck recording on tab switch or alt-tab)
+    window.addEventListener('blur', () => {
+      if (pttController.isSpacePressed || pttController.isPointerPressed || isPTTActive) {
+        pttController.isSpacePressed = false;
+        pttController.isPointerPressed = false;
+        pttController.stop();
+      }
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && (pttController.isSpacePressed || pttController.isPointerPressed || isPTTActive)) {
+        pttController.isSpacePressed = false;
+        pttController.isPointerPressed = false;
+        pttController.stop();
       }
     });
 
     // Command Input & Execution
     let commandHistory = [];
     let historyIndex = -1;
+    let isBuildInFlight = false;
 
     document.getElementById('commandInput').addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -2967,6 +3017,10 @@
     });
 
     async function sendCommand() {
+      if (isBuildInFlight) {
+        ToastManager.show('Antigravity is currently building. Please wait for current build to finish.', 'info');
+        return;
+      }
       const input = document.getElementById('commandInput');
       const prompt = input.value.trim();
       if (!prompt) return;
@@ -2985,19 +3039,30 @@
     }
 
     async function executeCommand(prompt) {
+      if (isBuildInFlight) return;
+      isBuildInFlight = true;
+
+      const requestId = 'req_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
       addChatMessage('user', prompt);
       logAntigravity(`[USER] ${prompt}`, 'user');
       logAntigravity('Antigravity Coding Engine analyzing request...', 'thinking');
       showAntigravityLoader('Antigravity is analyzing your request...');
 
       const sendBtn = document.getElementById('sendBtn');
-      sendBtn.disabled = true;
+      const cmdInput = document.getElementById('commandInput');
+      if (sendBtn) sendBtn.disabled = true;
+      if (cmdInput) cmdInput.disabled = true;
 
       try {
         const res = await fetch('/api/modify-project', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ slug: ACTIVE_SLUG, prompt: prompt, model: selectedAntigravityModel })
+          body: JSON.stringify({
+            slug: ACTIVE_SLUG,
+            prompt: prompt,
+            model: selectedAntigravityModel,
+            request_id: requestId
+          })
         });
         const data = await res.json();
         hideAntigravityLoader();
@@ -3029,7 +3094,12 @@
         logAntigravity('Network error submitting command.', 'error');
         ToastManager.show('Request failed', 'error');
       } finally {
-        sendBtn.disabled = false;
+        isBuildInFlight = false;
+        if (sendBtn) sendBtn.disabled = false;
+        if (cmdInput) {
+          cmdInput.disabled = false;
+          cmdInput.focus();
+        }
       }
     }
 
