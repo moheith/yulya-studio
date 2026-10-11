@@ -30,11 +30,136 @@ import projects_manager
 import ai_engine
 import server
 from aiohttp.test_utils import make_mocked_request
+import re
+
+class MockCursor:
+    def __init__(self, docs):
+        self.docs = list(docs)
+    def sort(self, *args, **kwargs):
+        return self
+    def limit(self, n):
+        self.docs = self.docs[:n]
+        return self
+    async def to_list(self, length=None):
+        if length is not None:
+            return [dict(d) for d in self.docs[:length]]
+        return [dict(d) for d in self.docs]
+    def __aiter__(self):
+        self._iter = iter(self.docs)
+        return self
+    async def __anext__(self):
+        try:
+            return dict(next(self._iter))
+        except StopIteration:
+            raise StopAsyncIteration
+
+class MockCollection:
+    def __init__(self):
+        self.store = []
+        self._counter = 0
+
+    def _matches(self, doc, query):
+        if not query:
+            return True
+        for k, v in query.items():
+            if k == "$or" and isinstance(v, list):
+                if not any(self._matches(doc, sub_q) for sub_q in v):
+                    return False
+            elif isinstance(v, dict):
+                if "$ne" in v and doc.get(k) == v["$ne"]:
+                    return False
+                if "$exists" in v and (k in doc) != v["$exists"]:
+                    return False
+                if "$regex" in v:
+                    pattern = v["$regex"]
+                    flags = re.IGNORECASE if "i" in v.get("$options", "") else 0
+                    val_str = str(doc.get(k, ""))
+                    if not re.search(pattern, val_str, flags):
+                        return False
+            elif k in doc:
+                if doc[k] != v and str(doc[k]).lower() != str(v).lower():
+                    return False
+            elif k not in doc:
+                return False
+        return True
+
+    async def create_index(self, *args, **kwargs):
+        return "idx_mock"
+
+    async def find_one(self, query):
+        for doc in self.store:
+            if self._matches(doc, query):
+                return dict(doc)
+        return None
+
+    def find(self, query=None):
+        matching = [doc for doc in self.store if self._matches(doc, query or {})]
+        return MockCursor(matching)
+
+    async def insert_one(self, doc):
+        d = dict(doc)
+        self._counter += 1
+        d["_id"] = str(d.get("_id", f"mock_{self._counter}"))
+        self.store.append(d)
+        res = MagicMock()
+        res.inserted_id = d["_id"]
+        return res
+
+    async def update_one(self, query, update, upsert=False):
+        target = None
+        for doc in self.store:
+            if self._matches(doc, query):
+                target = doc
+                break
+        if not target and upsert:
+            target = {}
+            for k, v in query.items():
+                if not k.startswith("$"):
+                    target[k] = v
+            self._counter += 1
+            target["_id"] = f"mock_{self._counter}"
+            self.store.append(target)
+
+        if target:
+            if "$set" in update:
+                target.update(update["$set"])
+            if "$pull" in update:
+                for pull_field, pull_crit in update["$pull"].items():
+                    target[pull_field] = [
+                        item for item in target.get(pull_field, [])
+                        if not all(item.get(pk) == pv for pk, pv in pull_crit.items())
+                    ]
+        res = MagicMock()
+        res.modified_count = 1 if target else 0
+        return res
+
+    async def delete_one(self, query):
+        res = MagicMock()
+        res.deleted_count = 0
+        for i, doc in enumerate(self.store):
+            if self._matches(doc, query):
+                self.store.pop(i)
+                res.deleted_count = 1
+                break
+        return res
 
 async def run_tests():
     print("=== STARTING YULYA STUDIO TEST SUITE ===")
     tests_passed = 0
     tests_failed = 0
+
+    # P0 Database Test Isolation: Assign mock in-memory collections so tests NEVER touch production MongoDB Atlas!
+    mock_users_col = MockCollection()
+    mock_profiles_col = MockCollection()
+    mock_projects_col = MockCollection()
+    mock_sessions_col = MockCollection()
+    mock_signals_col = MockCollection()
+
+    database.users_col = mock_users_col
+    database.profiles_col = mock_profiles_col
+    database.projects_col = mock_projects_col
+    database.sessions_col = mock_sessions_col
+    database.signals_col = mock_signals_col
 
     def assert_true(condition, msg):
         nonlocal tests_passed, tests_failed
@@ -481,54 +606,6 @@ async def run_tests():
     # 8. Studio Profiles Database Tracking Tests
     print("\n8. Testing Database Studio Profiles Tracking...")
     try:
-        # Test simulated in-memory collection if MongoDB not connected in CI
-        mock_profiles_store = {}
-        
-        class MockCollection:
-            def __init__(self):
-                self.store = {}
-            async def find_one(self, query):
-                for doc in self.store.values():
-                    match = True
-                    for k, v in query.items():
-                        if k == "$or" and isinstance(v, list):
-                            if not any(all(doc.get(sub_k) == sub_v for sub_k, sub_v in sub_q.items()) for sub_q in v):
-                                match = False
-                        elif isinstance(v, dict) and "$ne" in v:
-                            if doc.get(k) == v["$ne"]: match = False
-                        elif doc.get(k) != v:
-                            match = False
-                    if match:
-                        return dict(doc)
-                return None
-            async def insert_one(self, doc):
-                d = dict(doc)
-                d["_id"] = f"mock_{len(self.store)}"
-                self.store[d["user_id"]] = d
-                res = MagicMock()
-                res.inserted_id = d["_id"]
-                return res
-            async def update_one(self, query, update, upsert=False):
-                user_id = query.get("user_id")
-                doc = self.store.get(user_id)
-                if not doc and upsert:
-                    doc = {"user_id": user_id}
-                    self.store[user_id] = doc
-                if doc:
-                    if "$set" in update:
-                        doc.update(update["$set"])
-                    if "$pull" in update:
-                        pull_field = list(update["$pull"].keys())[0]
-                        pull_crit = update["$pull"][pull_field]
-                        doc[pull_field] = [
-                            item for item in doc.get(pull_field, [])
-                            if not all(item.get(k) == v for k, v in pull_crit.items())
-                        ]
-                res = MagicMock()
-                res.modified_count = 1
-                return res
-
-        orig_profiles_col = database.profiles_col
         mock_col = MockCollection()
         database.profiles_col = mock_col
 
@@ -571,7 +648,7 @@ async def run_tests():
         assert_true(len(fetched_after["created_games"]) == 0, "Game removed from created_games array on project delete")
         assert_true("Space Combat" not in fetched_after.get("game_names", []), "Game title removed from game_names on project delete")
 
-        database.profiles_col = orig_profiles_col
+        database.profiles_col = mock_profiles_col
 
     except Exception as e:
         assert_true(False, f"Profiles database tracking test failed: {e}")
@@ -869,7 +946,7 @@ async def run_tests():
         assert_true("live_models" in health_data and "code_models" in health_data, "Health returns live and code models")
 
         # 11.6 Full Application Startup & Teardown Lifecycle Test
-        app = await server.init_app()
+        app = await server.init_app(init_database=False)
         runner = server.web.AppRunner(app)
         await runner.setup()
         assert_true(app.get("idle_task") is not None, "Idle task started on app runner setup")

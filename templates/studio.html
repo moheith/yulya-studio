@@ -1438,6 +1438,7 @@
     let screenStream = null;
     let screenInterval = null;
     let pendingLiveConnect = false;
+    let liveConnectTimer = null;
 
     // Live Voice State - Default PTT
     let isLiveConnected = false;
@@ -2434,6 +2435,7 @@
               }
 
               if (state === 'CONNECTED') {
+                if (liveConnectTimer) { clearTimeout(liveConnectTimer); liveConnectTimer = null; }
                 isLiveConnected = true;
                 updateLiveButton(true);
                 setLiveStatus(actualModel, 'online');
@@ -2442,6 +2444,7 @@
                 updateLiveButton(false, true);
                 setLiveStatus(`Connecting to ${actualModel}...`, 'connecting');
               } else if (state === 'LISTENING') {
+                if (liveConnectTimer) { clearTimeout(liveConnectTimer); liveConnectTimer = null; }
                 isLiveConnected = true;
                 updateLiveButton(true);
                 setLiveStatus(actualModel + ' (Listening)', 'listening');
@@ -2458,10 +2461,12 @@
                 liveAudioPlayer.stop();
                 setLiveStatus(actualModel + ' Ready', 'online');
               } else if (state === 'DISCONNECTED') {
+                if (liveConnectTimer) { clearTimeout(liveConnectTimer); liveConnectTimer = null; }
                 isLiveConnected = false;
                 updateLiveButton(false);
                 setLiveStatus(actualModel + ' (Offline)', 'offline');
               } else if (state === 'ERROR') {
+                if (liveConnectTimer) { clearTimeout(liveConnectTimer); liveConnectTimer = null; }
                 isLiveConnected = false;
                 updateLiveButton(false);
                 setLiveStatus('Live Connection Error', 'offline');
@@ -2469,6 +2474,7 @@
               }
             } else if (data.type === 'live_status') {
               if (data.status === 'connected') {
+                if (liveConnectTimer) { clearTimeout(liveConnectTimer); liveConnectTimer = null; }
                 isLiveConnected = true;
                 updateLiveButton(true);
                 const connectedModelName = data.model || 'Gemini Live';
@@ -2497,12 +2503,14 @@
               } else if (data.status === 'thinking') {
                 setLiveStatus('Extended Thinking (High)...', 'thinking');
               } else if (data.status === 'disconnected') {
+                if (liveConnectTimer) { clearTimeout(liveConnectTimer); liveConnectTimer = null; }
                 isLiveConnected = false;
                 setLiveStatus(formatVoiceModelName(selectedVoiceModel) + ' (Offline)', 'offline');
                 updateLiveButton(false);
                 logTerminal('[LIVE_AI] Disconnected from Gemini Live', 'info');
               }
             } else if (data.type === 'live_error') {
+              if (liveConnectTimer) { clearTimeout(liveConnectTimer); liveConnectTimer = null; }
               logTerminal(`[LIVE_ERROR] ${data.message}`, 'error');
               ToastManager.show(data.message, 'error');
               setLiveStatus('Gemini Live Error', 'offline');
@@ -2617,6 +2625,7 @@
       }
 
       if (isLiveConnected) {
+        if (liveConnectTimer) { clearTimeout(liveConnectTimer); liveConnectTimer = null; }
         pendingLiveConnect = false;
         ws.send(JSON.stringify({ type: 'disconnect_live' }));
         liveAudioPlayer.stop();
@@ -2631,15 +2640,31 @@
         setLiveStatus(`Connecting to ${targetModelName}...`, 'connecting');
         updateLiveButton(false, true);
         logTerminal(`[LIVE] Connecting to ${targetModelName}...`, 'thinking');
+
+        if (liveConnectTimer) clearTimeout(liveConnectTimer);
+        liveConnectTimer = setTimeout(() => {
+          if (!isLiveConnected) {
+            updateLiveButton(false);
+            setLiveStatus('Live Connection Timeout', 'offline');
+            ToastManager.show('Live AI connection timed out (15s). Click Connect Live AI to retry.', 'error');
+            logTerminal('[LIVE_ERROR] Live AI connection timed out after 15s. Click Connect Live AI to retry.', 'error');
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'disconnect_live' }));
+            }
+          }
+        }, 15000);
+
         ws.send(JSON.stringify({ type: 'connect_live', model: selectedVoiceModel }));
         liveAudioPlayer.init();
-        startMicrophone().then(ok => {
-          if (ok && voiceMode === 'continuous') {
-            isListening = true;
-            setLiveStatus('Continuous Voice Active', 'listening');
-            animateWaveform('listening');
-          }
-        });
+        if (voiceMode === 'continuous') {
+          startMicrophone().then(ok => {
+            if (ok) {
+              isListening = true;
+              setLiveStatus('Continuous Voice Active', 'listening');
+              animateWaveform('listening');
+            }
+          });
+        }
       }
     }
 
@@ -2723,7 +2748,8 @@
           }
           const base64Data = window.btoa(binary);
 
-          ws.send(JSON.stringify({ type: 'audio_chunk', pcm: base64Data }));
+          const uttId = (pttController && pttController.currentUtteranceId) || null;
+          ws.send(JSON.stringify({ type: 'audio_chunk', pcm: base64Data, utterance_id: uttId }));
         };
 
         const muteNode = micAudioContext.createGain();
@@ -2797,6 +2823,7 @@
         this.micInitPromise = null;
         this.isSpacePressed = false;
         this.isPointerPressed = false;
+        this.currentUtteranceId = null;
       }
 
       canStart() {
@@ -2815,6 +2842,7 @@
           return;
         }
 
+        this.currentUtteranceId = 'utt_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
         this.state = PTTState.STARTING;
         isPTTActive = true;
         isListening = true;
@@ -2885,9 +2913,10 @@
           setLiveStatus('Extended Thinking (High)...', 'thinking');
           if (ws && ws.readyState === WebSocket.OPEN) {
             // Signal audio turn complete without sending duplicate transcript as text turn!
-            ws.send(JSON.stringify({ type: 'audio_end' }));
+            ws.send(JSON.stringify({ type: 'audio_end', utterance_id: this.currentUtteranceId }));
           }
         }
+        this.currentUtteranceId = null;
         currentSpeechTranscript = '';
         this.state = PTTState.IDLE;
       }
@@ -3021,7 +3050,7 @@
       isBuildInFlight = true;
 
       const requestId = 'req_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-      addChatMessage('user', prompt);
+      // Strictly emit to Antigravity activity feed - keep Voice Chat clean for Gemini Live speech
       logAntigravity(`[USER] ${prompt}`, 'user');
       logAntigravity('Antigravity Coding Engine analyzing request...', 'thinking');
       showAntigravityLoader('Antigravity is analyzing your request...');

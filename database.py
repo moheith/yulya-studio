@@ -16,45 +16,65 @@ projects_col = None
 sessions_col = None
 signals_col = None
 
-async def init_db():
+async def init_db(uri: str = None, db_name: str = None, create_indexes: bool = True, is_test: bool = False):
     global db_client, db, users_col, profiles_col, projects_col, sessions_col, signals_col
-    if not config.MONGO_URI:
+    
+    if is_test:
+        # P0 Test Safety: Dedicated test connection is required. Never silently fall back to production MONGO_URI!
+        test_uri = uri or config.TEST_MONGO_URI
+        if not test_uri:
+            raise RuntimeError(
+                "[DATABASE TEST ISOLATION] Refusing to run tests: TEST_MONGO_URI is not set. "
+                "Tests must NEVER run against production MongoDB!"
+            )
+        target_db_name = db_name or config.TEST_MONGO_DB_NAME
+        if target_db_name == "yulya_bot_db":
+            raise RuntimeError(
+                "[DATABASE TEST ISOLATION] Refusing to run tests: Test database name cannot be 'yulya_bot_db'!"
+            )
+        target_uri = test_uri
+    else:
+        target_uri = uri or config.MONGO_URI
+        target_db_name = db_name or getattr(config, "MONGO_DB_NAME", "yulya_bot_db")
+        
+    if not target_uri:
         print("[DATABASE] Warning: MONGO_URI not configured!")
         return False
     
     try:
-        db_client = AsyncIOMotorClient(config.MONGO_URI, maxIdleTimeMS=60000)
-        db = db_client['yulya_bot_db']
+        db_client = AsyncIOMotorClient(target_uri, maxIdleTimeMS=60000)
+        db = db_client[target_db_name]
         users_col = db['user_profiles']
         profiles_col = db['studio_profiles']
         projects_col = db['studio_projects']
         sessions_col = db['studio_sessions']
         signals_col = db['studio_signals']
         
-        # 1. Studio Profiles indexes
-        await profiles_col.create_index([("user_id", 1)], unique=True)
-        await profiles_col.create_index([("username", 1)])
-        await profiles_col.create_index([("login_id", 1)])
-        
-        # 2. Projects indexes
-        await projects_col.create_index([("user_id", 1), ("slug", 1)], unique=True)
-        await projects_col.create_index([("updated_at", -1)])
-        await projects_col.create_index([("spectator_token", 1)], sparse=True)
-        
-        # 3. Sessions indexes (TTL: 30 days)
-        await sessions_col.create_index([("token", 1)], unique=True)
-        try:
-            await sessions_col.create_index([("created_at_dt", 1)], expireAfterSeconds=86400 * 30)
-        except Exception:
-            pass
+        if create_indexes:
+            # 1. Studio Profiles indexes
+            await profiles_col.create_index([("user_id", 1)], unique=True)
+            await profiles_col.create_index([("username", 1)])
+            await profiles_col.create_index([("login_id", 1)])
+            
+            # 2. Projects indexes
+            await projects_col.create_index([("user_id", 1), ("slug", 1)], unique=True)
+            await projects_col.create_index([("updated_at", -1)])
+            await projects_col.create_index([("spectator_token", 1)], sparse=True)
+            
+            # 3. Sessions indexes (TTL: 30 days)
+            await sessions_col.create_index([("token", 1)], unique=True)
+            try:
+                await sessions_col.create_index([("created_at_dt", 1)], expireAfterSeconds=86400 * 30)
+            except Exception:
+                pass
 
-        # 4. Signals index (TTL: 10 minutes)
-        try:
-            await signals_col.create_index([("created_at_dt", 1)], expireAfterSeconds=600)
-        except Exception:
-            pass
+            # 4. Signals index (TTL: 10 minutes)
+            try:
+                await signals_col.create_index([("created_at_dt", 1)], expireAfterSeconds=600)
+            except Exception:
+                pass
 
-        print("[DATABASE] Connected to MongoDB (yulya_bot_db) successfully.")
+        print(f"[DATABASE] Connected to MongoDB ({target_db_name}) successfully.")
         return True
     except Exception as e:
         print(f"[DATABASE] Connection error: {e}")

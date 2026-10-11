@@ -242,24 +242,12 @@ async def handle_studio(request: web.Request) -> web.Response:
             proj = await database.get_project_by_username_and_slug(user["username"], slug)
         if proj:
             projects = await database.list_user_projects(user["id"])
-            resp = await render_template("studio.html", {
+            return await render_template("studio.html", {
                 "user": user,
                 "projects": projects,
                 "active_slug": slug,
                 "active_project": proj
             })
-            token_q = request.query.get("token")
-            if token_q:
-                resp.set_cookie(
-                    config.COOKIE_NAME,
-                    token_q,
-                    max_age=86400 * 30,
-                    httponly=True,
-                    samesite="Lax",
-                    secure=False,
-                    path="/"
-                )
-            return resp
             
     # Never auto-create games! Cleanly redirect to the user's profile where they can browse and click "+ New Project"
     return web.HTTPFound(f"/{user['username']}")
@@ -1339,7 +1327,7 @@ Never guess or hallucinate code without reading the actual project files. When t
 
                 try:
                     cm = client.aio.live.connect(model=cand.id, config=connect_cfg)
-                    session = await cm.__aenter__()
+                    session = await asyncio.wait_for(cm.__aenter__(), timeout=10.0)
                     live_cm = cm
                     connected_candidate = cand
                     session_ctx.actual_model_id = cand.id
@@ -1348,6 +1336,11 @@ Never guess or hallucinate code without reading the actual project files. When t
                     print(f"[LIVE_CONNECT] Connected to {cand.display_name} ({cand.id})")
                     break
                 except Exception as conn_err:
+                    if cm:
+                        try:
+                            await cm.__aexit__(type(conn_err), conn_err, None)
+                        except Exception:
+                            pass
                     fail_class = classify_failure(conn_err)
                     print(f"[LIVE_RUNTIME_ERROR] {cand.id} failed: {conn_err} ({fail_class.value})")
                     candidate_errors.append(f"{cand.id}: {conn_err}")
@@ -1465,6 +1458,12 @@ async def _live_receive_loop(ws: web.WebSocketResponse, slug: str, session, api_
                         
                     server_content = response.server_content
                     if server_content:
+                        # Authoritative spoken voice transcription flag check
+                        out_tx = getattr(server_content, "output_transcription", None)
+                        out_tx_text = getattr(out_tx, "text", None) if out_tx else None
+                        if out_tx_text:
+                            ai_audio_transcript_emitted = True
+
                         model_turn = server_content.model_turn
                         if model_turn:
                             for part in model_turn.parts:
@@ -1519,29 +1518,26 @@ async def _live_receive_loop(ws: web.WebSocketResponse, slug: str, session, api_
                                         })
 
                         # Authoritative spoken voice transcription from Gemini Live
-                        out_tx = getattr(server_content, "output_transcription", None)
-                        if out_tx and getattr(out_tx, "text", None):
-                            ai_speech_chunk = out_tx.text
-                            if ai_speech_chunk and not ws.closed:
-                                ai_audio_transcript_emitted = True
-                                ai_delta_seq += 1
-                                if session_ctx:
-                                    await session_ctx.transition_to(LiveState.SPEAKING)
-                                actual_display = session_ctx.actual_model_display if session_ctx else "Gemini Live"
-                                actual_id = session_ctx.actual_model_id if session_ctx else "gemini-3.8-live"
-                                evt_id = f"evt_ai_{int(time.time()*1000)}_{ai_delta_seq}"
-                                await ws.send_json({
-                                    "type": "ai_transcript_delta",
-                                    "event_id": evt_id,
-                                    "turn_id": current_ai_turn_id,
-                                    "speaker": "ai",
-                                    "delta": ai_speech_chunk,
-                                    "sequence": ai_delta_seq,
-                                    "model": actual_display,
-                                    "model_id": actual_id,
-                                    "is_final": False,
-                                    "timestamp": time.time()
-                                })
+                        if out_tx_text and not ws.closed:
+                            ai_speech_chunk = out_tx_text
+                            ai_delta_seq += 1
+                            if session_ctx:
+                                await session_ctx.transition_to(LiveState.SPEAKING)
+                            actual_display = session_ctx.actual_model_display if session_ctx else "Gemini Live"
+                            actual_id = session_ctx.actual_model_id if session_ctx else "gemini-3.8-live"
+                            evt_id = f"evt_ai_{int(time.time()*1000)}_{ai_delta_seq}"
+                            await ws.send_json({
+                                "type": "ai_transcript_delta",
+                                "event_id": evt_id,
+                                "turn_id": current_ai_turn_id,
+                                "speaker": "ai",
+                                "delta": ai_speech_chunk,
+                                "sequence": ai_delta_seq,
+                                "model": actual_display,
+                                "model_id": actual_id,
+                                "is_final": False,
+                                "timestamp": time.time()
+                            })
 
                         # Authoritative microphone audio transcription from user
                         in_tx = getattr(server_content, "input_transcription", None)
@@ -1969,40 +1965,50 @@ async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
                     elif msg_type == "audio_chunk":
                         # Forward audio chunk from creator's microphone to Gemini Live session
                         if ws in ACTIVE_LIVE_SESSIONS:
-                            pcm_b64 = data.get("pcm")
-                            if pcm_b64 and len(pcm_b64) <= 256_000:
-                                try:
-                                    pcm_bytes = base64.b64decode(pcm_b64)
-                                    live_sess = ACTIVE_LIVE_SESSIONS[ws]["session"]
-                                    await live_sess.send_realtime_input(
-                                        audio=types.Blob(data=pcm_bytes, mime_type="audio/pcm;rate=16000")
-                                    )
-                                except Exception as audio_err:
-                                    print(f"[AUDIO CHUNK SEND ERROR] {audio_err}")
+                            session_info = ACTIVE_LIVE_SESSIONS[ws]
+                            session_ctx = session_info.get("context")
+                            # Gate audio chunks during tool execution or invalid states to prevent Render 1008 errors
+                            if session_ctx and session_ctx.state in (LiveState.TOOL_RUNNING, LiveState.FALLING_BACK, LiveState.DISCONNECTED, LiveState.ERROR):
+                                pass
+                            else:
+                                pcm_b64 = data.get("pcm")
+                                if pcm_b64 and len(pcm_b64) <= 256_000:
+                                    try:
+                                        pcm_bytes = base64.b64decode(pcm_b64)
+                                        live_sess = session_info["session"]
+                                        await live_sess.send_realtime_input(
+                                            audio=types.Blob(data=pcm_bytes, mime_type="audio/pcm;rate=16000")
+                                        )
+                                    except Exception as audio_err:
+                                        print(f"[AUDIO CHUNK SEND ERROR] {audio_err}")
 
                     elif msg_type == "audio_end":
                         # Creator finished speaking turn (signals turn complete to Gemini Live)
                         if ws in ACTIVE_LIVE_SESSIONS:
-                            live_sess = ACTIVE_LIVE_SESSIONS[ws]["session"]
-                            try:
-                                session_ctx = ACTIVE_LIVE_SESSIONS[ws].get("context")
-                                attach_frame = False
-                                if session_ctx and session_ctx.screenshare:
-                                    attach_frame = session_ctx.screenshare.should_attach_to_turn(freshness_sec=2.5)
-                                elif slot.get("latest_screen_frame"):
-                                    attach_frame = True
+                            session_info = ACTIVE_LIVE_SESSIONS[ws]
+                            session_ctx = session_info.get("context")
+                            if session_ctx and session_ctx.state in (LiveState.TOOL_RUNNING, LiveState.FALLING_BACK, LiveState.DISCONNECTED, LiveState.ERROR):
+                                pass
+                            else:
+                                live_sess = session_info["session"]
+                                try:
+                                    attach_frame = False
+                                    if session_ctx and session_ctx.screenshare:
+                                        attach_frame = session_ctx.screenshare.should_attach_to_turn(freshness_sec=2.5)
+                                    elif slot.get("latest_screen_frame"):
+                                        attach_frame = True
 
-                                if attach_frame and slot.get("latest_screen_frame"):
-                                    try:
-                                        await live_sess.send_realtime_input(media=types.Blob(data=slot["latest_screen_frame"], mime_type="image/jpeg"))
-                                        if session_ctx and session_ctx.screenshare:
-                                            session_ctx.screenshare.mark_frame_sent_to_gemini()
-                                    except Exception as fe:
-                                        print(f"[LIVE FRAME ERROR] {fe}")
-                                # Audio was streamed via realtime chunks; signal completion of that audio stream
-                                await live_sess.send_realtime_input(audio_stream_end=True)
-                            except Exception as e:
-                                print(f"[LIVE] Error sending audio_stream_end on audio_end: {e}")
+                                    if attach_frame and slot.get("latest_screen_frame"):
+                                        try:
+                                            await live_sess.send_realtime_input(media=types.Blob(data=slot["latest_screen_frame"], mime_type="image/jpeg"))
+                                            if session_ctx and session_ctx.screenshare:
+                                                session_ctx.screenshare.mark_frame_sent_to_gemini()
+                                        except Exception as fe:
+                                            print(f"[LIVE FRAME ERROR] {fe}")
+                                    # Audio was streamed via realtime chunks; signal completion of that audio stream
+                                    await live_sess.send_realtime_input(audio_stream_end=True)
+                                except Exception as e:
+                                    print(f"[LIVE] Error sending audio_stream_end on audio_end: {e}")
 
                     elif msg_type == "live_text":
                         # Creator sends text directly to Gemini Live session
@@ -2292,12 +2298,13 @@ async def idle_monitor_loop():
 
 # --- App Initialization ---
 
-async def init_app():
+async def init_app(init_database: bool = True):
     app = web.Application(middlewares=[security_headers_middleware])
     
     # Startup and cleanup lifecycle
     async def on_startup(app):
-        await database.init_db()
+        if init_database:
+            await database.init_db()
         run_startup_validation()
         app['idle_task'] = asyncio.create_task(idle_monitor_loop())
 
