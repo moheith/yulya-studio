@@ -325,7 +325,7 @@
                 <div class="card-author">By <a href="/{{ game.username }}" style="color: var(--accent-primary); text-decoration: none;">@{{ game.username }}</a></div>
                 <p class="card-desc">{{ game.description or 'HTML5 Canvas game created with Yulya Studio.' }}</p>
                 <div class="card-tags">
-                  {% for tag in (game.tags or ['canvas', 'game']) %}
+                  {% for tag in (game.tags if (game.tags is sequence and game.tags is not string) else ['canvas', 'game']) %}
                     <span class="tag-pill">{{ tag }}</span>
                   {% endfor %}
                 </div>

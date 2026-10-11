@@ -22,6 +22,7 @@ from live_session import (
     FailureClass,
     classify_failure,
     is_fallback_eligible,
+    is_terminal_failure,
     LiveSessionContext,
     safe_execute_tool,
     ScreenshareSubsystem
@@ -63,8 +64,11 @@ RECENT_BUILD_RESPONSES = {} # (user_id, slug, request_id) -> (timestamp, respons
 
 
 # Active Gemini Live sessions per creator WebSocket:
-# { ws: { "session": AsyncSession, "cm": context_manager, "receive_task": asyncio.Task, "slug": str, "client": genai.Client, "context": LiveSessionContext } }
+# { ws: { "session": AsyncSession, "cm": context_manager, "receive_task": asyncio.Task, "slug": str, "client": genai.Client, "context": LiveSessionContext, "generation": int, "session_id": str } }
 ACTIVE_LIVE_SESSIONS = {}
+WS_SESSION_LOCKS = {}  # ws -> asyncio.Lock
+WS_SESSION_GENERATIONS = {}  # ws -> int
+
 
 # Rate limit buckets: { "action:key": [timestamps] }
 RATE_LIMIT_BUCKETS = {}
@@ -238,12 +242,24 @@ async def handle_studio(request: web.Request) -> web.Response:
             proj = await database.get_project_by_username_and_slug(user["username"], slug)
         if proj:
             projects = await database.list_user_projects(user["id"])
-            return await render_template("studio.html", {
+            resp = await render_template("studio.html", {
                 "user": user,
                 "projects": projects,
                 "active_slug": slug,
                 "active_project": proj
             })
+            token_q = request.query.get("token")
+            if token_q:
+                resp.set_cookie(
+                    config.COOKIE_NAME,
+                    token_q,
+                    max_age=86400 * 30,
+                    httponly=True,
+                    samesite="Lax",
+                    secure=False,
+                    path="/"
+                )
+            return resp
             
     # Never auto-create games! Cleanly redirect to the user's profile where they can browse and click "+ New Project"
     return web.HTTPFound(f"/{user['username']}")
@@ -439,87 +455,141 @@ async def api_create_project(request: web.Request) -> web.Response:
     except Exception as e:
         return web.json_response({"success": False, "error": f"Project creation failed: {str(e)}"}, status=400)
 
-async def api_modify_project(request: web.Request) -> web.Response:
-    user = await get_session_user(request)
-    if not user:
-        return web.json_response({"success": False, "error": "Your session has expired. Please sign in again."}, status=401)
-        
-    # Rate limit: 10 requests / min (Section 30)
-    allowed, wait_sec = check_rate_limit("modify_proj", str(user["id"]), *config.RATE_LIMIT_MODIFY)
+async def orchestrate_build(
+    user_id: int,
+    username: str,
+    slug: str,
+    instruction: str,
+    preferred_model: str = None,
+    request_id: str = None,
+    source: str = "manual",
+    ws: web.WebSocketResponse = None,
+    live_session = None
+) -> dict:
+    """
+    Unified authoritative build orchestration pipeline for Yulya Studio.
+    Used by:
+    - HTTP POST /api/modify-project
+    - WebSocket 'command' handler
+    - Voice AI architect tools: send_prompt_to_antigravity and modify_game_code
+    
+    Guarantees:
+    1. Single authoritative preference lookup with waterfall cascade
+    2. Authentication & project-ownership verification
+    3. Centralized rate limiting
+    4. Per-project concurrency protection (ACTIVE_PROJECT_BUILDS)
+    5. Stable request & build IDs with idempotency caching
+    6. Structured Antigravity logging and broadcast updates
+    7. Consistent post-build notification to Gemini Live
+    """
+    if not user_id or not slug or not instruction:
+        return {"success": False, "error_type": "INVALID_ARGUMENT", "error": "Missing user, slug, or instruction."}
+
+    user_id_int = int(user_id)
+    safe_slug = slug.strip().lower()
+    clean_instr = instruction.strip()
+
+    # Rate limit check (Section 30)
+    allowed, wait_sec = check_rate_limit("build", str(user_id_int), *config.RATE_LIMIT_MODIFY)
     if not allowed:
-        return web.json_response({
-            "success": False, 
-            "error": f"You're sending requests too quickly. Try again in {wait_sec} seconds."
-        }, status=429)
-        
+        msg = f"You're sending requests too quickly. Try again in {wait_sec} seconds."
+        if ws and not ws.closed:
+            await ws.send_json({"type": "log", "level": "warning", "message": msg})
+        return {"success": False, "error_type": "RATE_LIMITED", "error": msg}
+
+    # Ownership check (Section 79)
+    proj = await database.get_project(user_id_int, safe_slug)
+    if not proj:
+        return {"success": False, "error_type": "NOT_FOUND", "error": "Project not found or not owned by you."}
+
+    now_ts = time.time()
+    req_id = str(request_id or f"req_{source}_{int(now_ts * 1000)}").strip()
+    bld_id = f"bld_{source}_{int(now_ts * 1000)}"
+
+    # Idempotency check: if this request_id was processed within 60s, return cached result
+    dedup_key = (user_id_int, safe_slug, req_id)
+    if dedup_key in RECENT_BUILD_RESPONSES:
+        cached_time, cached_res = RECENT_BUILD_RESPONSES[dedup_key]
+        if now_ts - cached_time < 60:
+            return cached_res
+
+    # Centralized per-project concurrency protection
+    build_key = (user_id_int, safe_slug)
+    if build_key in ACTIVE_PROJECT_BUILDS:
+        msg = "A build is already running for this project. Please wait for it to complete."
+        if ws and not ws.closed:
+            await ws.send_json({"type": "log", "level": "warning", "message": msg})
+        return {"success": False, "error_type": "CONCURRENT_BUILD", "error": msg}
+
+    # API key resolution
+    profile = await database.get_user_profile(user_id_int)
+    api_key = profile.get("studio_api_key") if profile else None
+    if not api_key:
+        st_prof = await database.get_profile_by_user_id(user_id_int)
+        if st_prof and st_prof.get("studio_api_key"):
+            api_key = st_prof.get("studio_api_key")
+
+    if not api_key:
+        return {"success": False, "error_type": "AUTH", "error": "No Google AI Studio API key saved. Please set up your key first."}
+
+    # Authoritative model resolution with waterfall
+    chosen_model = preferred_model
+    if not chosen_model or not models_registry.validate_code_model(chosen_model):
+        db_pref = await database.get_user_preference(user_id_int, "preferred_code_model")
+        if db_pref and models_registry.validate_code_model(db_pref):
+            chosen_model = db_pref
+        else:
+            chosen_model = models_registry.DEFAULT_CODE_MODEL_ID
+
+    ACTIVE_PROJECT_BUILDS.add(build_key)
     try:
-        body = await request.json()
-        slug = body.get("slug")
-        prompt = body.get("prompt", "").strip()
-        request_id = str(body.get("request_id") or f"req_{int(time.time()*1000)}").strip()
-        build_id = f"bld_{int(time.time()*1000)}"
-        
-        if not slug or not prompt:
-            return web.json_response({"success": False, "error": "Missing slug or prompt."}, status=400)
-            
-        # Ownership check (Section 79)
-        proj = await database.get_project(user["id"], slug)
-        if not proj:
-            return web.json_response({"success": False, "error": "Project not found or not owned by you."}, status=404)
+        if ws and not ws.closed:
+            await ws.send_json({"type": "show_loader", "text": f"Antigravity is coding: {clean_instr[:60]}...", "request_id": req_id, "build_id": bld_id})
 
-        # Idempotency check: if this request_id was processed within 60s, return cached result
-        now_ts = time.time()
-        dedup_key = (int(user["id"]), slug.lower(), request_id)
-        if dedup_key in RECENT_BUILD_RESPONSES:
-            cached_time, cached_res = RECENT_BUILD_RESPONSES[dedup_key]
-            if now_ts - cached_time < 60:
-                return web.json_response(cached_res)
-            
-        profile = await database.get_user_profile(user["id"])
-        api_key = profile.get("studio_api_key") if profile else None
-        if not api_key:
-            return web.json_response({"success": False, "error": "No Google AI Studio API key saved. Please set up your key first."}, status=400)
-            
-        model = body.get("model")
-
-        # Broadcast Antigravity CLI log steps to connected WebSockets with structured channel and IDs
         async def _log_callback(step_type, message_text):
             await broadcast_project_log(
-                slug, message_text, level=step_type, channel="antigravity",
-                request_id=request_id, build_id=build_id
+                safe_slug, message_text, level=step_type, channel="antigravity",
+                request_id=req_id, build_id=bld_id
             )
-            
+
         result = await ai_engine.process_code_request(
-            api_key, user["id"], user["username"], slug, prompt,
-            log_callback=_log_callback, preferred_model=model,
-            request_id=request_id, build_id=build_id
+            api_key, user_id_int, username, safe_slug, clean_instr,
+            log_callback=_log_callback, preferred_model=chosen_model,
+            request_id=req_id, build_id=bld_id
         )
-        
+
+        if ws and not ws.closed:
+            await ws.send_json({"type": "hide_loader"})
+
         # Cache idempotency response
         RECENT_BUILD_RESPONSES[dedup_key] = (now_ts, result)
-        # Clean older responses
         if len(RECENT_BUILD_RESPONSES) > 200:
             expired = [k for k, v in RECENT_BUILD_RESPONSES.items() if now_ts - v[0] > 120]
             for k in expired:
                 RECENT_BUILD_RESPONSES.pop(k, None)
-        
+
         if result.get("success"):
-            # Hot-reload update to creator + spectators (Section 20)
-            await broadcast_project_update(slug, {
+            await broadcast_project_update(safe_slug, {
                 "type": "code_update",
                 "summary": result["summary"],
                 "content": result["content"],
-                "model_used": result.get("model_used"),
-                "request_id": request_id,
-                "build_id": build_id,
+                "model_used": result.get("model_used", chosen_model),
+                "request_id": req_id,
+                "build_id": bld_id,
                 "timestamp": int(time.time())
             })
-            slot = ACTIVE_STUDIO_WS.get(slug, {})
+            await broadcast_project_log(
+                safe_slug, f"[PASS] {result['summary']}", level="pass", channel="antigravity",
+                request_id=req_id, build_id=bld_id
+            )
+
+            # Post-build voice notification to Gemini Live
+            slot = ACTIVE_STUDIO_WS.get(safe_slug, {})
             for live_ws, live_info in list(ACTIVE_LIVE_SESSIONS.items()):
-                if live_info.get("slug") == slug and not live_ws.closed:
-                    try:
-                        s = live_info.get("session")
-                        if s:
+                if live_info.get("slug") == safe_slug and not live_ws.closed:
+                    s = live_info.get("session")
+                    if s:
+                        try:
                             parts = []
                             if slot.get("latest_screen_frame"):
                                 parts.append(types.Part.from_bytes(data=slot["latest_screen_frame"], mime_type="image/jpeg"))
@@ -536,12 +606,57 @@ async def api_modify_project(request: web.Request) -> web.Response:
                                 turns=[types.Content(role="user", parts=parts)],
                                 turn_complete=True
                             )
-                    except Exception:
-                        pass
-            
-        return web.json_response(result)
+                        except Exception as ne:
+                            print(f"[LIVE POST-BUILD NOTIFY ERROR] {ne}")
+        else:
+            err_msg = result.get("error", "Code build failed")
+            await broadcast_project_log(
+                safe_slug, f"[FAIL] Antigravity build failed: {err_msg}", "fail", channel="antigravity",
+                request_id=req_id, build_id=bld_id
+            )
+            for live_ws, live_info in list(ACTIVE_LIVE_SESSIONS.items()):
+                if live_info.get("slug") == safe_slug and not live_ws.closed:
+                    s = live_info.get("session")
+                    if s:
+                        try:
+                            await s.send_client_content(
+                                turns=[types.Content(role="user", parts=[types.Part.from_text(text=f"[System: Antigravity build failed: {err_msg}. Inform the creator and discuss how to adjust the plan.]")])],
+                                turn_complete=True
+                            )
+                        except Exception:
+                            pass
+
+        return result
+    finally:
+        ACTIVE_PROJECT_BUILDS.discard(build_key)
+
+
+async def api_modify_project(request: web.Request) -> web.Response:
+    user = await get_session_user(request)
+    if not user:
+        return web.json_response({"success": False, "error": "Your session has expired. Please sign in again."}, status=401)
+        
+    try:
+        body = await request.json()
+        slug = body.get("slug")
+        prompt = body.get("prompt", "").strip()
+        request_id = body.get("request_id")
+        model = body.get("model")
+
+        res = await orchestrate_build(
+            user_id=user["id"],
+            username=user["username"],
+            slug=slug,
+            instruction=prompt,
+            preferred_model=model,
+            request_id=request_id,
+            source="manual"
+        )
+        status_code = 200 if res.get("success") else 400
+        return web.json_response(res, status=status_code)
     except Exception as e:
         return web.json_response({"success": False, "error": f"Error modifying project: {str(e)}"}, status=500)
+
 
 
 async def api_delete_project(request: web.Request) -> web.Response:
@@ -970,61 +1085,69 @@ async def start_gemini_live_session(ws: web.WebSocketResponse, slug: str, sessio
     """
     Initializes a bi-directional Gemini Live session using the user's personal API key.
     Supports preferred_model selection with automatic waterfall cascade to fallback models on error.
+    Enforces per-WebSocket lifecycle lock and monotonic generational identity to eliminate session leaks.
     """
-    try:
-        user_id = session_user["id"]
-        username = session_user["username"]
-        profile = await database.get_user_profile(user_id)
-        api_key = profile.get("studio_api_key") if profile else None
-        if not api_key:
-            st_prof = await database.get_profile_by_user_id(user_id)
-            if st_prof and st_prof.get("studio_api_key"):
-                api_key = st_prof.get("studio_api_key")
-        
-        if not api_key:
-            if not ws.closed:
-                await ws.send_json({
-                    "type": "live_error",
-                    "message": "Google AI Studio API key not found in profile. Please add your key in your profile."
-                })
-            await broadcast_project_log(slug, "[LIVE_ERROR] Google AI Studio API key not found. Please save your key in your profile.", "error")
-            return
+    ws_lock = WS_SESSION_LOCKS.setdefault(ws, asyncio.Lock())
+    async with ws_lock:
+        try:
+            user_id = session_user["id"]
+            username = session_user["username"]
+            profile = await database.get_user_profile(user_id)
+            api_key = profile.get("studio_api_key") if profile else None
+            if not api_key:
+                st_prof = await database.get_profile_by_user_id(user_id)
+                if st_prof and st_prof.get("studio_api_key"):
+                    api_key = st_prof.get("studio_api_key")
+            
+            if not api_key:
+                if not ws.closed:
+                    await ws.send_json({
+                        "type": "live_error",
+                        "message": "Google AI Studio API key not found in profile. Please add your key in your profile."
+                    })
+                await broadcast_project_log(slug, "[LIVE_ERROR] Google AI Studio API key not found. Please save your key in your profile.", "error")
+                return
 
-        # Close existing session for this socket if any
-        await stop_gemini_live_session(ws)
+            # Monotonic generational counter for this socket
+            gen = WS_SESSION_GENERATIONS.get(ws, 0) + 1
+            WS_SESSION_GENERATIONS[ws] = gen
 
-        if not preferred_model:
-            db_pref = await database.get_user_preference(user_id, "preferred_live_model")
-            if db_pref and models_registry.validate_live_model(db_pref):
-                preferred_model = db_pref
+            # Close existing session for this socket while holding lock
+            await _stop_gemini_live_session_locked(ws)
 
-        req_model_id = preferred_model or models_registry.DEFAULT_LIVE_MODEL_ID
-        session_ctx = LiveSessionContext(ws=ws, slug=slug, user_id=user_id, username=username, requested_model_id=req_model_id)
-        m_entry = models_registry.get_model(req_model_id)
-        target_display = m_entry.display_name if m_entry else req_model_id
+            if not preferred_model:
+                db_pref = await database.get_user_preference(user_id, "preferred_live_model")
+                if db_pref and models_registry.validate_live_model(db_pref):
+                    preferred_model = db_pref
 
-        # Notify UI and state machine that connection handshake is active
-        await session_ctx.transition_to(LiveState.CONNECTING, reason=f"Connecting to {target_display}...")
-        await broadcast_project_log(slug, f"[LIVE_CONNECT] Connecting to {target_display}...", "live")
+            req_model_id = preferred_model or models_registry.DEFAULT_LIVE_MODEL_ID
+            session_ctx = LiveSessionContext(ws=ws, slug=slug, user_id=user_id, username=username, requested_model_id=req_model_id, generation=gen)
+            m_entry = models_registry.get_model(req_model_id)
+            target_display = m_entry.display_name if m_entry else req_model_id
 
-        # Read existing project files dynamically for immediate context
-        repo_files = projects_manager.list_project_files(user_id, slug)
-        files_context_parts = []
-        text_exts = {".html", ".css", ".js", ".json", ".svg", ".txt", ".csv"}
-        for rf in repo_files:
-            if Path(rf).suffix.lower() in text_exts:
-                try:
-                    fcontent = projects_manager.read_project_file(user_id, slug, rf)
-                    files_context_parts.append(f"--- {rf} ---\n{fcontent[:6000]}")
-                except Exception:
-                    pass
-        files_context_str = "\n".join(files_context_parts) if files_context_parts else "No files created yet."
+            # Notify UI and state machine that connection handshake is active
+            await session_ctx.transition_to(LiveState.CONNECTING, reason=f"Connecting to {target_display}...")
 
-        creator_name = session_user.get('username', 'creator')
-        manifest_data = projects_manager.get_project_manifest(user_id, slug)
-        manifest_summary = json.dumps(manifest_data, indent=2)
+            await broadcast_project_log(slug, f"[LIVE_CONNECT] Connecting to {target_display}...", "live")
 
-        live_sys_prompt = f"""You are Gemini 3.8 Live Extended Thinking on High, the Creative Director & Principal Game Architect inside Yulya Studio.
+            # Read existing project files dynamically for immediate context
+            repo_files = projects_manager.list_project_files(user_id, slug)
+            files_context_parts = []
+            text_exts = {".html", ".css", ".js", ".json", ".svg", ".txt", ".csv"}
+            for rf in repo_files:
+                if Path(rf).suffix.lower() in text_exts:
+                    try:
+                        fcontent = projects_manager.read_project_file(user_id, slug, rf)
+                        files_context_parts.append(f"--- {rf} ---\n{fcontent[:6000]}")
+                    except Exception:
+                        pass
+            files_context_str = "\n".join(files_context_parts) if files_context_parts else "No files created yet."
+
+            creator_name = session_user.get('username', 'creator')
+            manifest_data = projects_manager.get_project_manifest(user_id, slug)
+            manifest_summary = json.dumps(manifest_data, indent=2)
+
+            live_sys_prompt = f"""You are Gemini 3.8 Live Extended Thinking on High, the Creative Director & Principal Game Architect inside Yulya Studio.
 You are speaking in real-time to creator @{creator_name} who is building a web game project named '{slug}'.
 
 **Your Role as Creative Director & Game Architect:**
@@ -1059,329 +1182,257 @@ Never guess or hallucinate code without reading the actual project files. When t
 {files_context_str}
 """
 
-        architect_tools = types.Tool(
-            function_declarations=[
-                types.FunctionDeclaration(
-                    name="draft_prompt_to_input",
-                    description="Populates the drafted Antigravity engineering prompt into the creator's on-screen command input text box for review and editing before sending.",
-                    behavior="NON_BLOCKING",
-                    parameters=types.Schema(
-                        type="OBJECT",
-                        properties={
-                            "prompt": types.Schema(type="STRING", description="The complete, detailed engineering specification prompt for Antigravity.")
-                        },
-                        required=["prompt"]
+            architect_tools = types.Tool(
+                function_declarations=[
+                    types.FunctionDeclaration(
+                        name="draft_prompt_to_input",
+                        description="Populates the drafted Antigravity engineering prompt into the creator's on-screen command input text box for review and editing before sending.",
+                        behavior="NON_BLOCKING",
+                        parameters=types.Schema(
+                            type="OBJECT",
+                            properties={
+                                "prompt": types.Schema(type="STRING", description="The complete, detailed engineering specification prompt for Antigravity.")
+                            },
+                            required=["prompt"]
+                        )
+                    ),
+                    types.FunctionDeclaration(
+                        name="send_prompt_to_antigravity",
+                        description="Sends the approved build instruction to the Antigravity Coding Engine to compile and update the game files.",
+                        behavior="NON_BLOCKING",
+                        parameters=types.Schema(
+                            type="OBJECT",
+                            properties={
+                                "instruction": types.Schema(type="STRING", description="Detailed code modification instruction to build.")
+                            },
+                            required=["instruction"]
+                        )
+                    ),
+                    types.FunctionDeclaration(
+                        name="modify_game_code",
+                        description="Builds or modifies HTML5 Canvas game files with Antigravity.",
+                        behavior="NON_BLOCKING",
+                        parameters=types.Schema(
+                            type="OBJECT",
+                            properties={
+                                "instruction": types.Schema(type="STRING", description="Detailed code modification instruction")
+                            },
+                            required=["instruction"]
+                        )
+                    ),
+                    types.FunctionDeclaration(
+                        name="get_project_summary",
+                        description="Returns the project manifest memory (engine, architecture, systems, controls, known bugs, design decisions, current build) and file listing.",
+                        behavior="NON_BLOCKING",
+                        parameters=types.Schema(
+                            type="OBJECT",
+                            properties={}
+                        )
+                    ),
+                    types.FunctionDeclaration(
+                        name="list_project_files",
+                        description="Lists all files in the current game project repository.",
+                        behavior="NON_BLOCKING",
+                        parameters=types.Schema(
+                            type="OBJECT",
+                            properties={}
+                        )
+                    ),
+                    types.FunctionDeclaration(
+                        name="read_project_file",
+                        description="Reads the text content of a specific file in the current game project (e.g. 'index.html', 'src/game.js', 'project_manifest.json').",
+                        behavior="NON_BLOCKING",
+                        parameters=types.Schema(
+                            type="OBJECT",
+                            properties={
+                                "path": types.Schema(type="STRING", description="Relative path of the project file to read.")
+                            },
+                            required=["path"]
+                        )
+                    ),
+                    types.FunctionDeclaration(
+                        name="search_project",
+                        description="Searches across all text files in the project for a keyword, variable, function, or mechanic.",
+                        behavior="NON_BLOCKING",
+                        parameters=types.Schema(
+                            type="OBJECT",
+                            properties={
+                                "query": types.Schema(type="STRING", description="Search term or phrase to look for across the project files.")
+                            },
+                            required=["query"]
+                        )
+                    ),
+                    types.FunctionDeclaration(
+                        name="get_current_build",
+                        description="Returns recent build log entries from Antigravity to see build status, steps taken, and recent diffs.",
+                        behavior="NON_BLOCKING",
+                        parameters=types.Schema(
+                            type="OBJECT",
+                            properties={}
+                        )
+                    ),
+                    types.FunctionDeclaration(
+                        name="get_known_bugs",
+                        description="Retrieves known bugs and unresolved issues recorded in the project manifest memory.",
+                        behavior="NON_BLOCKING",
+                        parameters=types.Schema(
+                            type="OBJECT",
+                            properties={}
+                        )
+                    ),
+                    types.FunctionDeclaration(
+                        name="validate_project",
+                        description="Runs diagnostics on the project to detect broken references, missing tags, syntax warnings, or security issues.",
+                        behavior="NON_BLOCKING",
+                        parameters=types.Schema(
+                            type="OBJECT",
+                            properties={}
+                        )
+                    ),
+                    types.FunctionDeclaration(
+                        name="save_design_decision",
+                        description="Persists a key design decision (e.g. 'cyberpunk dark theme', 'boss spawns at 500 score') into the project manifest memory.",
+                        behavior="NON_BLOCKING",
+                        parameters=types.Schema(
+                            type="OBJECT",
+                            properties={
+                                "decision": types.Schema(type="STRING", description="The game design decision to record and remember.")
+                            },
+                            required=["decision"]
+                        )
+                    ),
+                    types.FunctionDeclaration(
+                        name="remember_creator_preference",
+                        description="Remembers a specific creator style preference (e.g. 'wants fast movement', 'dislikes retro pixel art') in project memory.",
+                        behavior="NON_BLOCKING",
+                        parameters=types.Schema(
+                            type="OBJECT",
+                            properties={
+                                "preference": types.Schema(type="STRING", description="The creator preference to remember across sessions.")
+                            },
+                            required=["preference"]
+                        )
                     )
-                ),
-                types.FunctionDeclaration(
-                    name="send_prompt_to_antigravity",
-                    description="Sends the approved build instruction to the Antigravity Coding Engine to compile and update the game files.",
-                    behavior="NON_BLOCKING",
-                    parameters=types.Schema(
-                        type="OBJECT",
-                        properties={
-                            "instruction": types.Schema(type="STRING", description="Detailed code modification instruction to build.")
-                        },
-                        required=["instruction"]
-                    )
-                ),
-                types.FunctionDeclaration(
-                    name="modify_game_code",
-                    description="Builds or modifies HTML5 Canvas game files with Antigravity.",
-                    behavior="NON_BLOCKING",
-                    parameters=types.Schema(
-                        type="OBJECT",
-                        properties={
-                            "instruction": types.Schema(type="STRING", description="Detailed code modification instruction")
-                        },
-                        required=["instruction"]
-                    )
-                ),
-                types.FunctionDeclaration(
-                    name="get_project_summary",
-                    description="Returns the project manifest memory (engine, architecture, systems, controls, known bugs, design decisions, current build) and file listing.",
-                    behavior="NON_BLOCKING",
-                    parameters=types.Schema(
-                        type="OBJECT",
-                        properties={}
-                    )
-                ),
-                types.FunctionDeclaration(
-                    name="list_project_files",
-                    description="Lists all files in the current game project repository.",
-                    behavior="NON_BLOCKING",
-                    parameters=types.Schema(
-                        type="OBJECT",
-                        properties={}
-                    )
-                ),
-                types.FunctionDeclaration(
-                    name="read_project_file",
-                    description="Reads the text content of a specific file in the current game project (e.g. 'index.html', 'src/game.js', 'project_manifest.json').",
-                    behavior="NON_BLOCKING",
-                    parameters=types.Schema(
-                        type="OBJECT",
-                        properties={
-                            "path": types.Schema(type="STRING", description="Relative path of the project file to read.")
-                        },
-                        required=["path"]
-                    )
-                ),
-                types.FunctionDeclaration(
-                    name="search_project",
-                    description="Searches across all text files in the project for a keyword, variable, function, or mechanic.",
-                    behavior="NON_BLOCKING",
-                    parameters=types.Schema(
-                        type="OBJECT",
-                        properties={
-                            "query": types.Schema(type="STRING", description="Search term or phrase to look for across the project files.")
-                        },
-                        required=["query"]
-                    )
-                ),
-                types.FunctionDeclaration(
-                    name="get_current_build",
-                    description="Returns recent build log entries from Antigravity to see build status, steps taken, and recent diffs.",
-                    behavior="NON_BLOCKING",
-                    parameters=types.Schema(
-                        type="OBJECT",
-                        properties={}
-                    )
-                ),
-                types.FunctionDeclaration(
-                    name="get_known_bugs",
-                    description="Retrieves known bugs and unresolved issues recorded in the project manifest memory.",
-                    behavior="NON_BLOCKING",
-                    parameters=types.Schema(
-                        type="OBJECT",
-                        properties={}
-                    )
-                ),
-                types.FunctionDeclaration(
-                    name="validate_project",
-                    description="Runs diagnostics on the project to detect broken references, missing tags, syntax warnings, or security issues.",
-                    behavior="NON_BLOCKING",
-                    parameters=types.Schema(
-                        type="OBJECT",
-                        properties={}
-                    )
-                ),
-                types.FunctionDeclaration(
-                    name="save_design_decision",
-                    description="Persists a key design decision (e.g. 'cyberpunk dark theme', 'boss spawns at 500 score') into the project manifest memory.",
-                    behavior="NON_BLOCKING",
-                    parameters=types.Schema(
-                        type="OBJECT",
-                        properties={
-                            "decision": types.Schema(type="STRING", description="The game design decision to record and remember.")
-                        },
-                        required=["decision"]
-                    )
-                ),
-                types.FunctionDeclaration(
-                    name="remember_creator_preference",
-                    description="Remembers a specific creator style preference (e.g. 'wants fast movement', 'dislikes retro pixel art') in project memory.",
-                    behavior="NON_BLOCKING",
-                    parameters=types.Schema(
-                        type="OBJECT",
-                        properties={
-                            "preference": types.Schema(type="STRING", description="The creator preference to remember across sessions.")
-                        },
-                        required=["preference"]
-                    )
+                ]
+            )
+
+            client = genai.Client(api_key=api_key.strip())
+
+            # Connection waterfall for Gemini Live models derived authoritatively from registry
+            candidates = models_registry.get_live_fallback_candidates(req_model_id)
+            session = None
+            live_cm = None
+            connected_candidate = None
+            candidate_errors = []
+
+            for idx, cand in enumerate(candidates):
+                has_thinking = cand.supports_thinking
+                connect_cfg = types.LiveConnectConfig(
+                    response_modalities=["AUDIO"],
+                    system_instruction=types.Content(parts=[types.Part.from_text(text=live_sys_prompt)]),
+                    tools=[architect_tools],
+                    output_audio_transcription=types.AudioTranscriptionConfig(),
+                    input_audio_transcription=types.AudioTranscriptionConfig()
                 )
-            ]
-        )
+                if has_thinking:
+                    connect_cfg.thinking_config = types.ThinkingConfig(thinking_level="HIGH", include_thoughts=True)
 
-        client = genai.Client(api_key=api_key.strip())
+                try:
+                    cm = client.aio.live.connect(model=cand.id, config=connect_cfg)
+                    session = await cm.__aenter__()
+                    live_cm = cm
+                    connected_candidate = cand
+                    session_ctx.actual_model_id = cand.id
+                    session_ctx.actual_model_display = cand.display_name
+                    session_ctx.is_extended_thinking = has_thinking
+                    print(f"[LIVE_CONNECT] Connected to {cand.display_name} ({cand.id})")
+                    break
+                except Exception as conn_err:
+                    fail_class = classify_failure(conn_err)
+                    print(f"[LIVE_RUNTIME_ERROR] {cand.id} failed: {conn_err} ({fail_class.value})")
+                    candidate_errors.append(f"{cand.id}: {conn_err}")
 
-        # Connection waterfall for Gemini Live models derived authoritatively from registry
-        candidates = models_registry.get_live_fallback_candidates(req_model_id)
-        session = None
-        live_cm = None
-        connected_candidate = None
-        candidate_errors = []
+                    # If authentication or bad request, stop immediately without waterfalling
+                    if not is_fallback_eligible(fail_class):
+                        await session_ctx.transition_to(LiveState.ERROR, reason=f"Authentication or configuration error: {conn_err}")
+                        raise conn_err
 
-        for idx, cand in enumerate(candidates):
-            has_thinking = cand.supports_thinking
-            connect_cfg = types.LiveConnectConfig(
-                response_modalities=["AUDIO"],
-                system_instruction=types.Content(parts=[types.Part.from_text(text=live_sys_prompt)]),
-                tools=[architect_tools],
-                output_audio_transcription=types.AudioTranscriptionConfig(),
-                input_audio_transcription=types.AudioTranscriptionConfig()
-            )
-            if has_thinking:
-                connect_cfg.thinking_config = types.ThinkingConfig(thinking_level="HIGH", include_thoughts=True)
+                    next_cand = candidates[idx + 1] if idx + 1 < len(candidates) else None
+                    if next_cand:
+                        session_ctx.fallback_count += 1
+                        session_ctx.fallback_chain.append(cand.id)
+                        session_ctx.fallback_reason = f"{cand.id} ({fail_class.value}): {str(conn_err)[:60]}"
+                        await session_ctx.transition_to(
+                            LiveState.FALLING_BACK,
+                            reason=f"{cand.display_name} unavailable ({fail_class.value}). Shifting to {next_cand.display_name}..."
+                        )
+                        shift_msg = f"[LIVE_FALLBACK] {cand.display_name} unavailable ({str(conn_err)[:60]}). Shifting to {next_cand.display_name}..."
+                        await broadcast_project_log(slug, shift_msg, "live_error")
 
+            if not session or not live_cm:
+                err_summary = "; ".join(candidate_errors)
+                await session_ctx.transition_to(LiveState.ERROR, reason=f"Connection failed: {err_summary}")
+                raise Exception(f"Live connect failed across candidates ({err_summary})")
+
+            session_ctx.session = session
+            session_ctx.cm = live_cm
+            session_ctx.client = client
+            await session_ctx.transition_to(LiveState.CONNECTED)
+            await broadcast_project_log(slug, f"[CALL] Connected to {session_ctx.actual_model_display}", "call")
+
+            # Start receive loop task
+            receive_task = asyncio.create_task(_live_receive_loop(ws, slug, session, api_key, session_user, session_ctx))
+            ACTIVE_LIVE_SESSIONS[ws] = {
+                "session": session,
+                "cm": live_cm,
+                "receive_task": receive_task,
+                "slug": slug,
+                "client": client,
+                "context": session_ctx,
+                "generation": gen,
+                "session_id": session_ctx.session_id,
+            }
+
+            # Greet user first and start the 'grill-me' project interview immediately via public SDK method
             try:
-                cm = client.aio.live.connect(model=cand.id, config=connect_cfg)
-                session = await cm.__aenter__()
-                live_cm = cm
-                connected_candidate = cand
-                session_ctx.actual_model_id = cand.id
-                session_ctx.actual_model_display = cand.display_name
-                session_ctx.is_extended_thinking = has_thinking
-                print(f"[LIVE_CONNECT] Connected to {cand.display_name} ({cand.id})")
-                break
-            except Exception as conn_err:
-                fail_class = classify_failure(conn_err)
-                print(f"[LIVE_RUNTIME_ERROR] {cand.id} failed: {conn_err} ({fail_class.value})")
-                candidate_errors.append(f"{cand.id}: {conn_err}")
+                creator_name = session_user.get("username", "creator")
+                greet_text = (
+                    f"The creator @{creator_name} has just joined the call for the HTML5 Canvas project '{slug}'. "
+                    f"Speak immediately right now in voice: Greet @{creator_name} warmly and with high energy! "
+                    "Introduce yourself as their AI Game Architect & pair-programming co-pilot in Yulya Studio. "
+                    "Ask them what game or project idea they want to create today, and begin the design interview to help them plan and architect it!"
+                )
+                await session.send_client_content(
+                    turns=[types.Content(role="user", parts=[types.Part.from_text(text=greet_text)])],
+                    turn_complete=True
+                )
+            except Exception as greet_err:
+                print(f"[LIVE GREET ERROR] {greet_err}")
 
-                # If authentication or bad request, stop immediately without waterfalling
-                if not is_fallback_eligible(fail_class):
-                    await session_ctx.transition_to(LiveState.ERROR, reason=f"Authentication or configuration error: {conn_err}")
-                    raise conn_err
-
-                next_cand = candidates[idx + 1] if idx + 1 < len(candidates) else None
-                if next_cand:
-                    session_ctx.fallback_count += 1
-                    session_ctx.fallback_chain.append(cand.id)
-                    session_ctx.fallback_reason = f"{cand.id} ({fail_class.value}): {str(conn_err)[:60]}"
-                    await session_ctx.transition_to(
-                        LiveState.FALLING_BACK,
-                        reason=f"{cand.display_name} unavailable ({fail_class.value}). Shifting to {next_cand.display_name}..."
-                    )
-                    shift_msg = f"[LIVE_FALLBACK] {cand.display_name} unavailable ({str(conn_err)[:60]}). Shifting to {next_cand.display_name}..."
-                    await broadcast_project_log(slug, shift_msg, "live_error")
-
-        if not session or not live_cm:
-            err_summary = "; ".join(candidate_errors)
-            await session_ctx.transition_to(LiveState.ERROR, reason=f"Connection failed: {err_summary}")
-            raise Exception(f"Live connect failed across candidates ({err_summary})")
-
-        session_ctx.session = session
-        session_ctx.cm = live_cm
-        session_ctx.client = client
-        await session_ctx.transition_to(LiveState.CONNECTED)
-        await broadcast_project_log(slug, f"[CALL] Connected to {session_ctx.actual_model_display}", "call")
-
-        # Start receive loop task
-        receive_task = asyncio.create_task(_live_receive_loop(ws, slug, session, api_key, session_user, session_ctx))
-        ACTIVE_LIVE_SESSIONS[ws] = {
-            "session": session,
-            "cm": live_cm,
-            "receive_task": receive_task,
-            "slug": slug,
-            "client": client,
-            "context": session_ctx
-        }
-
-        # Greet user first and start the 'grill-me' project interview immediately via public SDK method
-        try:
-            creator_name = session_user.get("username", "creator")
-            greet_text = (
-                f"The creator @{creator_name} has just joined the call for the HTML5 Canvas project '{slug}'. "
-                f"Speak immediately right now in voice: Greet @{creator_name} warmly and with high energy! "
-                "Introduce yourself as their AI Game Architect & pair-programming co-pilot in Yulya Studio. "
-                "Ask them what game or project idea they want to create today, and begin the design interview to help them plan and architect it!"
-            )
-            await session.send_client_content(
-                turns=[types.Content(role="user", parts=[types.Part.from_text(text=greet_text)])],
-                turn_complete=True
-            )
-        except Exception as greet_err:
-            print(f"[LIVE GREET ERROR] {greet_err}")
-
-
-    except Exception as e:
-        print(f"[LIVE ERROR] start_gemini_live_session: {e}")
-        err_msg = str(e)
-        if not ws.closed:
-            await ws.send_json({
-                "type": "live_error",
-                "message": f"Gemini 3.8 Live error: {err_msg[:120]}"
-            })
-        await broadcast_project_log(slug, f"[LIVE_ERROR] {err_msg[:140]}", "error")
+        except Exception as e:
+            print(f"[LIVE ERROR] start_gemini_live_session: {e}")
+            err_msg = str(e)
+            if not ws.closed:
+                await ws.send_json({
+                    "type": "live_error",
+                    "message": f"Gemini 3.8 Live error: {err_msg[:120]}"
+                })
+            await broadcast_project_log(slug, f"[LIVE_ERROR] {err_msg[:140]}", "error")
 
 async def _run_antigravity_builder(slug: str, session_user: dict, api_key: str, instruction: str, ws: web.WebSocketResponse, session=None, preferred_model: str = None):
     """
-    Executes Antigravity code generation in a background task so the Gemini Live voice call
-    and receive loop stay unblocked. Creator can continue speaking with Gemini Live while coding runs.
-    Enforces centralized build admission controller tracking and preferred model cascade.
+    Executes Antigravity code generation by delegating to orchestrate_build,
+    so the Gemini Live voice call and receive loop stay unblocked.
     """
-    build_key = (session_user["id"], slug.lower())
-    ACTIVE_PROJECT_BUILDS.add(build_key)
-    request_id = f"req_voice_{int(time.time()*1000)}"
-    build_id = f"bld_voice_{int(time.time()*1000)}"
-    try:
-        if not ws.closed:
-            await ws.send_json({"type": "show_loader", "text": f"Antigravity is coding: {instruction[:60]}..."})
-
-        async def _cb(step_type, msg_text):
-            await broadcast_project_log(
-                slug, msg_text, level=step_type, channel="antigravity",
-                request_id=request_id, build_id=build_id
-            )
-
-        res = await ai_engine.process_code_request(
-            api_key, session_user["id"], session_user["username"], slug, instruction,
-            log_callback=_cb, preferred_model=preferred_model,
-            request_id=request_id, build_id=build_id
-        )
-
-        if not ws.closed:
-            await ws.send_json({"type": "hide_loader"})
-
-        if res.get("success"):
-            await broadcast_project_update(slug, {
-                "type": "code_update",
-                "summary": res["summary"],
-                "content": res["content"],
-                "model_used": res.get("model_used"),
-                "request_id": request_id,
-                "build_id": build_id,
-                "timestamp": int(time.time())
-            })
-            await broadcast_project_log(
-                slug, f"[PASS] {res['summary']}", level="pass", channel="antigravity",
-                request_id=request_id, build_id=build_id
-            )
-
-
-            # Notify Gemini Live voice session that build is complete and ready for playtesting / screenshare
-            if session and not ws.closed and ws in ACTIVE_LIVE_SESSIONS:
-                try:
-                    slot = ACTIVE_STUDIO_WS.get(slug, {})
-                    parts = []
-                    if slot.get("latest_screen_frame"):
-                        parts.append(types.Part.from_bytes(data=slot["latest_screen_frame"], mime_type="image/jpeg"))
-                    notify_text = (
-                        f"[System: Antigravity has completed compiling the game: '{res['summary']}'. "
-                        "The game is now running in the preview iframe on screen! "
-                        "Tell the creator that the build finished successfully! Invite them to test playing it right now in the preview, "
-                        "and remind them they can click the Screenshare button so you can watch them play live, "
-                        "see how the game feels, and brainstorm next improvements together.]"
-                    )
-                    parts.append(types.Part.from_text(text=notify_text))
-                    await session.send_client_content(
-                        turns=[types.Content(role="user", parts=parts)],
-                        turn_complete=True
-                    )
-                except Exception as notify_err:
-                    print(f"[LIVE POST-BUILD NOTIFY ERROR] {notify_err}")
-        else:
-            err_msg = res.get("error", "Code build failed")
-            await broadcast_project_log(slug, f"[FAIL] Antigravity build failed: {err_msg}", "fail")
-            if session and not ws.closed and ws in ACTIVE_LIVE_SESSIONS:
-                try:
-                    await session.send_client_content(
-                        turns=[types.Content(role="user", parts=[types.Part.from_text(text=f"[System: Antigravity build failed: {err_msg}. Inform the creator and discuss how to adjust the plan.]")])],
-                        turn_complete=True
-                    )
-                except Exception:
-                    pass
-    except Exception as e:
-        print(f"[ANTIGRAVITY BUILDER ERROR] {e}")
-        await broadcast_project_log(slug, f"[FAIL] Antigravity error: {e}", "fail")
-        if not ws.closed:
-            try:
-                await ws.send_json({"type": "hide_loader"})
-            except Exception:
-                pass
-    finally:
-        ACTIVE_PROJECT_BUILDS.discard(build_key)
+    return await orchestrate_build(
+        user_id=session_user["id"],
+        username=session_user.get("username", "creator"),
+        slug=slug,
+        instruction=instruction,
+        preferred_model=preferred_model,
+        source="voice",
+        ws=ws
+    )
 
 async def _live_receive_loop(ws: web.WebSocketResponse, slug: str, session, api_key: str, session_user: dict, session_ctx: LiveSessionContext = None):
     """Background listener for streaming audio, thoughts, deltas, and tool calls from Gemini Live across all turns."""
@@ -1394,11 +1445,22 @@ async def _live_receive_loop(ws: web.WebSocketResponse, slug: str, session, api_
     ai_audio_transcript_emitted = False
     user_id_val = int(session_user.get("id") or session_user.get("user_id", 0))
 
+    def is_authoritative() -> bool:
+        if not session_ctx or not session_ctx.is_active:
+            return False
+        entry = ACTIVE_LIVE_SESSIONS.get(ws)
+        if not entry:
+            return False
+        return (
+            entry.get("session_id") == session_ctx.session_id and
+            entry.get("generation") == session_ctx.generation
+        )
+
     try:
-        while not ws.closed and ws in ACTIVE_LIVE_SESSIONS:
+        while not ws.closed and is_authoritative():
             try:
                 async for response in session.receive():
-                    if ws.closed or ws not in ACTIVE_LIVE_SESSIONS:
+                    if ws.closed or not is_authoritative():
                         break
                         
                     server_content = response.server_content
@@ -1502,20 +1564,21 @@ async def _live_receive_loop(ws: web.WebSocketResponse, slug: str, session, api_
                         if server_content.turn_complete:
                             actual_display = session_ctx.actual_model_display if session_ctx else "Gemini Live"
                             actual_id = session_ctx.actual_model_id if session_ctx else "gemini-3.8-live"
-                            if not ws.closed:
-                                ai_delta_seq += 1
-                                await ws.send_json({
-                                    "type": "ai_transcript_delta",
-                                    "event_id": f"evt_ai_fin_{int(time.time()*1000)}",
-                                    "turn_id": current_ai_turn_id,
-                                    "speaker": "ai",
-                                    "delta": "",
-                                    "sequence": ai_delta_seq,
-                                    "model": actual_display,
-                                    "model_id": actual_id,
-                                    "is_final": True,
-                                    "timestamp": time.time()
-                                })
+                            if not ws.closed and is_authoritative():
+                                if ai_delta_seq > 0:
+                                    ai_delta_seq += 1
+                                    await ws.send_json({
+                                        "type": "ai_transcript_delta",
+                                        "event_id": f"evt_ai_fin_{int(time.time()*1000)}",
+                                        "turn_id": current_ai_turn_id,
+                                        "speaker": "ai",
+                                        "delta": "",
+                                        "sequence": ai_delta_seq,
+                                        "model": actual_display,
+                                        "model_id": actual_id,
+                                        "is_final": True,
+                                        "timestamp": time.time()
+                                    })
                                 if user_delta_seq > 0:
                                     user_delta_seq += 1
                                     await ws.send_json({
@@ -1532,7 +1595,7 @@ async def _live_receive_loop(ws: web.WebSocketResponse, slug: str, session, api_
                                     "type": "ai_turn_complete",
                                     "turn_id": current_ai_turn_id
                                 })
-                            if session_ctx:
+                            if session_ctx and is_authoritative():
                                 await session_ctx.transition_to(LiveState.LISTENING)
                             
                             ai_turn_counter += 1
@@ -1725,33 +1788,68 @@ async def _live_receive_loop(ws: web.WebSocketResponse, slug: str, session, api_
             except asyncio.CancelledError:
                 break
             except Exception as turn_err:
-                print(f"[LIVE RECEIVE TURN ERROR] {turn_err}")
-                if ws.closed or ws not in ACTIVE_LIVE_SESSIONS:
+                if not is_authoritative():
+                    # Stale or replaced receive loop, silently terminate
                     break
-                err_str = str(turn_err).lower()
-                if "connection closed" in err_str or "closed" in err_str or "1000" in err_str or "1006" in err_str:
+
+                fail_class = classify_failure(turn_err)
+                term = is_terminal_failure(turn_err)
+                print(f"[LIVE RECEIVE TURN ERROR] {fail_class.value} (terminal={term}): {turn_err}")
+                if term:
+                    # Permanent/terminal failure (e.g. 1008 Requested entity not found, 1000 closed, auth failure, etc.)
+                    # Stop the receive loop immediately to eliminate the Render 1008 infinite retry loop!
+                    if session_ctx:
+                        session_ctx.deactivate()
+                        await session_ctx.transition_to(LiveState.ERROR, reason=f"Terminal session error: {str(turn_err)[:80]}")
+                    if ws in ACTIVE_LIVE_SESSIONS and ACTIVE_LIVE_SESSIONS[ws].get("session_id") == (session_ctx.session_id if session_ctx else None):
+                        ACTIVE_LIVE_SESSIONS.pop(ws, None)
+                    if not ws.closed:
+                        await ws.send_json({
+                            "type": "live_error",
+                            "message": f"Gemini Live session ended: {str(turn_err)[:120]}"
+                        })
+                    await broadcast_project_log(slug, f"[LIVE_TERMINAL] Live session ended: {str(turn_err)[:120]}", "live_error")
                     break
-                await asyncio.sleep(0.05)
+                else:
+                    await asyncio.sleep(0.1)
     except asyncio.CancelledError:
         pass
     except Exception as e:
         print(f"[LIVE RECEIVE FATAL ERROR] {e}")
+    finally:
+        if session_ctx and session_ctx.is_active:
+            entry = ACTIVE_LIVE_SESSIONS.get(ws)
+            if entry and entry.get("session_id") == session_ctx.session_id:
+                session_ctx.deactivate()
+                ACTIVE_LIVE_SESSIONS.pop(ws, None)
 
-async def stop_gemini_live_session(ws: web.WebSocketResponse):
-    """Gracefully terminates an active Gemini Live session."""
+async def stop_gemini_live_session(ws: web.WebSocketResponse, lock_acquired: bool = False):
+    """Gracefully terminates an active Gemini Live session with concurrency serialization."""
+    ws_lock = WS_SESSION_LOCKS.setdefault(ws, asyncio.Lock())
+    if not lock_acquired:
+        async with ws_lock:
+            return await _stop_gemini_live_session_locked(ws)
+    else:
+        return await _stop_gemini_live_session_locked(ws)
+
+async def _stop_gemini_live_session_locked(ws: web.WebSocketResponse):
     if ws in ACTIVE_LIVE_SESSIONS:
         item = ACTIVE_LIVE_SESSIONS.pop(ws, None)
         if item:
+            ctx = item.get("context")
+            if ctx:
+                ctx.deactivate()
             task = item.get("receive_task")
             session = item.get("session")
             slug = item.get("slug")
+            cm = item.get("cm")
             if task and not task.done():
                 task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-            cm = item.get("cm")
+                if asyncio.current_task() != task:
+                    try:
+                        await task
+                    except (asyncio.CancelledError, Exception):
+                        pass
             if cm:
                 try:
                     await cm.__aexit__(None, None, None)
@@ -1764,11 +1862,18 @@ async def stop_gemini_live_session(ws: web.WebSocketResponse):
                     pass
             if not ws.closed:
                 try:
+                    await ws.send_json({
+                        "type": "live_session_state",
+                        "state": "DISCONNECTED",
+                        "old_state": "CONNECTED" if ctx else "DISCONNECTED",
+                        "timestamp": int(time.time()),
+                        "reason": "Live session stopped"
+                    })
                     await ws.send_json({"type": "live_status", "status": "disconnected"})
                 except Exception:
                     pass
             if slug:
-                await broadcast_project_log(slug, "[CALL] Gemini 3.8 Live session disconnected.", "call")
+                await broadcast_project_log(slug, "[CALL] Gemini Live session disconnected.", "call")
 
 # --- WebSocket Hub: /ws/studio (Section 19, 20, 21, 22) ---
 
@@ -1888,19 +1993,16 @@ async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
                                     attach_frame = True
 
                                 if attach_frame and slot.get("latest_screen_frame"):
-                                    parts = [types.Part.from_bytes(data=slot["latest_screen_frame"], mime_type="image/jpeg")]
-                                    if session_ctx and session_ctx.screenshare:
-                                        session_ctx.screenshare.mark_frame_sent_to_gemini()
-                                    await live_sess.send_client_content(
-                                        turns=[types.Content(role="user", parts=parts)],
-                                        turn_complete=True
-                                    )
-                                else:
-                                    # Audio was streamed via realtime chunks; signal completion of that audio turn
-                                    await live_sess.send_client_content(turn_complete=True)
+                                    try:
+                                        await live_sess.send_realtime_input(media=types.Blob(data=slot["latest_screen_frame"], mime_type="image/jpeg"))
+                                        if session_ctx and session_ctx.screenshare:
+                                            session_ctx.screenshare.mark_frame_sent_to_gemini()
+                                    except Exception as fe:
+                                        print(f"[LIVE FRAME ERROR] {fe}")
+                                # Audio was streamed via realtime chunks; signal completion of that audio stream
+                                await live_sess.send_realtime_input(audio_stream_end=True)
                             except Exception as e:
-                                print(f"[LIVE] Error sending turn_complete on audio_end: {e}")
-
+                                print(f"[LIVE] Error sending audio_stream_end on audio_end: {e}")
 
                     elif msg_type == "live_text":
                         # Creator sends text directly to Gemini Live session
@@ -1931,61 +2033,18 @@ async def handle_ws_studio(request: web.Request) -> web.WebSocketResponse:
                     elif msg_type == "command":
                         prompt = data.get("prompt", "").strip()
                         code_model = data.get("model")
-                        if not code_model and session_user:
-                            code_model = await database.get_user_preference(session_user["id"], "preferred_code_model")
-
                         if prompt and session_user:
-                            # Audit Point 13: Centralized build rate limiting
-                            allowed, wait_sec = check_rate_limit("build", str(session_user["id"]), *config.RATE_LIMIT_MODIFY)
-                            if not allowed:
-                                if not ws.closed:
-                                    await ws.send_json({
-                                        "type": "log",
-                                        "level": "warning",
-                                        "message": f"You're sending build requests too quickly. Please wait {wait_sec}s."
-                                    })
-                                continue
-
-                            # Audit Point 14: Centralized build admission check (prevent thrashing)
-                            build_key = (session_user["id"], slug.lower())
-                            if build_key in ACTIVE_PROJECT_BUILDS:
-                                if not ws.closed:
-                                    await ws.send_json({
-                                        "type": "log",
-                                        "level": "warning",
-                                        "message": "A build is already in progress for this project. Please wait for it to complete."
-                                    })
-                                continue
-
-                            profile = await database.get_user_profile(session_user["id"])
-                            api_key = profile.get("studio_api_key") if profile else None
-                            if api_key:
-                                if not ws.closed:
-                                    await ws.send_json({"type": "set_command_input", "text": ""})
-                                live_sess = ACTIVE_LIVE_SESSIONS.get(ws, {}).get("session")
-                                session_ctx = ACTIVE_LIVE_SESSIONS.get(ws, {}).get("context")
-                                if live_sess:
-                                    try:
-                                        parts = []
-                                        attach_frame = False
-                                        if session_ctx and session_ctx.screenshare:
-                                            attach_frame = session_ctx.screenshare.should_attach_to_turn(freshness_sec=2.5)
-                                        elif slot.get("latest_screen_frame"):
-                                            attach_frame = True
-
-                                        if attach_frame and slot.get("latest_screen_frame"):
-                                            parts.append(types.Part.from_bytes(data=slot["latest_screen_frame"], mime_type="image/jpeg"))
-                                            if session_ctx and session_ctx.screenshare:
-                                                session_ctx.screenshare.mark_frame_sent_to_gemini()
-
-                                        parts.append(types.Part.from_text(text=f"[System: The creator submitted the prompt to Antigravity: '{prompt}'. Tell the creator you see they launched the build and Antigravity is coding now! Keep chatting with them while it compiles.]"))
-                                        await live_sess.send_client_content(
-                                            turns=[types.Content(role="user", parts=parts)],
-                                            turn_complete=True
-                                        )
-                                    except Exception:
-                                        pass
-                                asyncio.create_task(_run_antigravity_builder(slug, session_user, api_key, prompt, ws, live_sess, preferred_model=code_model))
+                            if not ws.closed:
+                                await ws.send_json({"type": "set_command_input", "text": ""})
+                            asyncio.create_task(orchestrate_build(
+                                user_id=session_user["id"],
+                                username=session_user.get("username", "creator"),
+                                slug=slug,
+                                instruction=prompt,
+                                preferred_model=code_model,
+                                source="command",
+                                ws=ws
+                            ))
 
                     elif msg_type == "screenshare_status":
                         is_active = bool(data.get("active", False))

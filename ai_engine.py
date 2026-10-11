@@ -640,6 +640,23 @@ async def process_code_request(
                     "rollback_executed": True
                 }
 
+            # Physical entrypoint verification: ensure index.html exists
+            pdir = projects_manager.get_user_project_dir(user_id_int, safe_slug)
+            index_path = pdir / "index.html"
+            if not index_path.exists() or not index_path.is_file():
+                if snapshot:
+                    projects_manager.restore_snapshot(user_id_int, safe_slug, snapshot)
+                fail_step = "[FAIL] Build verification failed: missing required entrypoint 'index.html'. Restored working state."
+                projects_manager.write_build_log(user_id_int, safe_slug, "FAIL", fail_step)
+                if log_callback:
+                    try: await log_callback("fail", fail_step)
+                    except Exception: pass
+                return {
+                    "success": False,
+                    "error": "Build verification failed: missing required entrypoint 'index.html'. Restored previous working snapshot.",
+                    "rollback_executed": bool(snapshot)
+                }
+
             # Verify build
             engine_info = val_result.get("detected_engine", "canvas2d")
             libs_info = f" with {', '.join(val_result.get('libraries', []))}" if val_result.get("libraries") else ""

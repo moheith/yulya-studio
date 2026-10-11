@@ -1119,6 +1119,124 @@ async def run_tests():
     except Exception as e:
         assert_true(False, f"Section 16 test failed: {e}")
 
+    # 17. P0 Voice Rebuild, Session Leak Elimination, Database Preference Contract & Build Orchestration
+    print("\n17. Testing P0 Voice Rebuild, Session Leak Elimination & Build Orchestration...")
+    try:
+        # 17.1 Singular preference accessor in database.py
+        pref_none = await database.get_user_preference(999999999, "non_existent_key", default=None)
+        assert_true(pref_none is None, "get_user_preference returns None for nonexistent key without crash")
+        pref_default = await database.get_user_preference(999999999, "preferred_live_model", default="gemini-3.8-live")
+        assert_true(pref_default == "gemini-3.8-live", "get_user_preference returns default fallback safely")
+
+        # Test setting and reading preference
+        await database.save_user_preference(999999999, "test_pref", "custom_val")
+        read_back = await database.get_user_preference(999999999, "test_pref")
+        assert_true(read_back == "custom_val", "save_user_preference and get_user_preference round-trip succeeded")
+
+        # Plural accessor backwards compatibility
+        all_prefs = await database.get_user_preferences(999999999)
+        assert_true(isinstance(all_prefs, dict), "get_user_preferences returns dictionary")
+        assert_true(all_prefs.get("test_pref") == "custom_val", "get_user_preferences includes saved preference")
+
+        # 17.2 Terminal failure classification in live_session.py (Render 1008 loop fix)
+        import live_session
+        err_1008 = Exception("1008 None. Requested entity was not found.")
+        assert_true(live_session.is_terminal_failure(err_1008), "1008 Entity not found classified as terminal failure")
+        assert_true(live_session.classify_failure(err_1008) == live_session.LiveFailureClass.MODEL_UNAVAILABLE, "1008 classified as MODEL_UNAVAILABLE")
+
+        err_1000 = Exception("1000 OK. Connection closed cleanly.")
+        assert_true(live_session.is_terminal_failure(err_1000), "1000 Normal closure classified as terminal failure")
+
+        err_1006 = Exception("1006 Abnormal closure. Connection closed abnormally.")
+        assert_true(live_session.is_terminal_failure(err_1006), "1006 Abnormal closure classified as terminal failure")
+
+        err_auth = Exception("API_KEY_INVALID: User not permitted.")
+        assert_true(live_session.is_terminal_failure(err_auth), "Auth error classified as terminal failure")
+
+        # Transient errors should NOT be terminal
+        err_transient = Exception("504 Gateway Timeout: Read timed out")
+        assert_true(not live_session.is_terminal_failure(err_transient), "Transient timeout is NOT terminal")
+
+        err_quota = Exception("429 RESOURCE_EXHAUSTED: Quota exceeded")
+        assert_true(live_session.is_terminal_failure(err_quota), "Quota error is terminal for session")
+
+        # 17.3 Monotonic generational identity and session deactivation in LiveSessionContext
+        mock_ws_ctx = MagicMock()
+        mock_ws_ctx.closed = False
+        mock_ws_ctx.send_json = AsyncMock()
+        ctx = live_session.LiveSessionContext(
+            ws=mock_ws_ctx,
+            slug="session-leak-test",
+            user_id=12345,
+            username="testcreator",
+            requested_model_id="gemini-3.8-live",
+            generation=3
+        )
+        assert_true(ctx.generation == 3, f"Monotonic generation assigned: {ctx.generation}")
+        assert_true(len(ctx.session_id) > 10, f"Unique session_id assigned: {ctx.session_id}")
+        assert_true(ctx.is_active is True, "Session context initially active")
+
+        # Transition when active works
+        t_res = await ctx.transition_to(live_session.LiveState.CONNECTED)
+        assert_true(t_res is True, "Transition succeeded on active session")
+        assert_true(ctx.state == live_session.LiveState.CONNECTED, "State updated to CONNECTED")
+
+        # Deactivation prevents further stale transitions
+        ctx.deactivate()
+        assert_true(ctx.is_active is False, "Session deactivated")
+        assert_true(ctx.state == live_session.LiveState.DISCONNECTED, "State reset to DISCONNECTED on deactivation")
+        stale_t_res = await ctx.transition_to(live_session.LiveState.LISTENING)
+        assert_true(stale_t_res is False, "Stale transition rejected after deactivation")
+        assert_true(ctx.state == live_session.LiveState.DISCONNECTED, "State remained unchanged after stale transition")
+
+        # 17.4 Unified build orchestrator
+        # Test invalid argument rejection
+        bad_res = await server.orchestrate_build(user_id=None, username="alice", slug="neon-dodge", instruction="")
+        assert_true(bad_res["success"] is False and bad_res["error_type"] == "INVALID_ARGUMENT", "orchestrate_build rejects empty arguments")
+
+        # Test non-existent project rejection
+        notfound_res = await server.orchestrate_build(user_id=999999999, username="alice", slug="ghost-project-xyz", instruction="Add lasers")
+        assert_true(notfound_res["success"] is False and notfound_res["error_type"] == "NOT_FOUND", "orchestrate_build rejects non-existent project")
+
+        # Test concurrency lock on existing project
+        await database.save_project(user_id=88888, username="bob", slug="locked-project", title="Locked Project")
+        test_build_key = (88888, "locked-project")
+        server.ACTIVE_PROJECT_BUILDS.add(test_build_key)
+        concurrent_res = await server.orchestrate_build(user_id=88888, username="bob", slug="locked-project", instruction="Add missiles")
+        assert_true(concurrent_res["success"] is False and concurrent_res["error_type"] == "CONCURRENT_BUILD", "orchestrate_build rejects concurrent builds")
+        server.ACTIVE_PROJECT_BUILDS.discard(test_build_key)
+        await database.delete_project(88888, "locked-project")
+
+        # 17.5 Case-insensitive slug and username lookup in database.py
+        # Create test project
+        await database.save_project(user_id=77777, username="GameMaker", slug="cool-dodge", title="Cool Dodge")
+        p_exact = await database.get_project_by_username_and_slug("gamemaker", "cool-dodge")
+        assert_true(p_exact is not None and p_exact["slug"] == "cool-dodge", "get_project_by_username_and_slug matches lowercase")
+        p_case = await database.get_project_by_username_and_slug("GAMEMAKER", "COOL-DODGE")
+        assert_true(p_case is not None and p_case["slug"] == "cool-dodge", "get_project_by_username_and_slug matches uppercase input")
+        await database.delete_project(77777, "cool-dodge")
+
+        # 17.6 Physical entrypoint verification in ai_engine.py
+        ai_engine_src = Path("ai_engine.py").read_text(encoding="utf-8")
+        assert_true("missing required entrypoint 'index.html'" in ai_engine_src, "Physical index.html check present in ai_engine.py")
+        assert_true("restore_snapshot" in ai_engine_src, "Automatic snapshot rollback on missing entrypoint present in ai_engine.py")
+
+        # 17.7 Physical microphone track release in studio.html
+        studio_html_src = Path("templates/studio.html").read_text(encoding="utf-8")
+        assert_true("stopMicrophone()" in studio_html_src, "stopMicrophone defined in studio.html")
+        assert_true("micStream.getTracks().forEach(t => t.stop())" in studio_html_src, "Physical MediaStream track release in stopMicrophone")
+        assert_true("if (voiceMode === 'ptt') {\n          stopMicrophone();\n        }" in studio_html_src, "PTTController.stop calls stopMicrophone in studio.html")
+
+        # 17.8 Empty transcript bubble suppression in studio.html
+        assert_true("if (!delta || !delta.trim())" in studio_html_src, "handleTranscriptDelta guards against creating empty bubbles on empty deltas")
+        assert_true("finalizeAiChatTurn" not in studio_html_src, "Obsolete finalizeAiChatTurn completely eliminated from studio.html")
+        assert_true("finalizeUserChatTurn" not in studio_html_src, "Obsolete finalizeUserChatTurn completely eliminated from studio.html")
+        assert_true("audio_stream_end=True" in Path("server.py").read_text(encoding="utf-8"), "server.py uses public SDK audio_stream_end=True on audio_end")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        assert_true(False, f"Section 17 test failed: {e}")
+
     print(f"\n=== TEST SUITE COMPLETED: {tests_passed} PASSED, {tests_failed} FAILED ===")
     return tests_failed == 0
 

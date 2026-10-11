@@ -7,6 +7,7 @@ Tool Execution Contract with Observability, and Screenshare/Vision Subsystem.
 import time
 import base64
 import asyncio
+import uuid
 from enum import Enum
 from typing import Optional, Dict, Any, Callable, Coroutine
 from google.genai.errors import APIError
@@ -40,6 +41,9 @@ class FailureClass(str, Enum):
     MODEL_UNAVAILABLE = "MODEL_UNAVAILABLE"
     UNKNOWN = "UNKNOWN"
 
+# Alias for compatibility
+LiveFailureClass = FailureClass
+
 
 def classify_failure(err: Exception) -> FailureClass:
     """Classifies an exception into a FailureClass to determine if model fallback is justified."""
@@ -50,6 +54,10 @@ def classify_failure(err: Exception) -> FailureClass:
 
     err_str = str(err).lower()
     
+    if "1008" in err_str:
+        if "not found" in err_str or "entity" in err_str:
+            return FailureClass.MODEL_UNAVAILABLE
+        return FailureClass.INVALID_REQUEST
     if "api_key_invalid" in err_str or "unauthenticated" in err_str or "invalid api key" in err_str:
         return FailureClass.AUTH
     if "resource_exhausted" in err_str or "quota" in err_str or "429" in err_str:
@@ -86,6 +94,27 @@ def is_fallback_eligible(failure: FailureClass) -> bool:
         FailureClass.TRANSIENT_TRANSPORT,
         FailureClass.TIMEOUT
     )
+
+
+def is_terminal_failure(err: Exception) -> bool:
+    """
+    Determines if an exception indicates the WebSocket or Live session is permanently dead.
+    Terminal failures must STOP the receive loop, tear down the session, and never retry endlessly.
+    """
+    if isinstance(err, asyncio.CancelledError):
+        return True
+    err_str = str(err).lower()
+    if any(code in err_str for code in ["1000", "1001", "1006", "1008", "closed", "closing", "not found", "broken pipe", "cannot write to closing transport"]):
+        return True
+    fc = classify_failure(err)
+    return fc in (
+        FailureClass.AUTH,
+        FailureClass.MODEL_UNAVAILABLE,
+        FailureClass.INVALID_REQUEST,
+        FailureClass.QUOTA,
+        FailureClass.USER_INTERRUPTION
+    )
+
 
 
 class ScreenshareSubsystem:
@@ -215,8 +244,9 @@ class LiveSessionContext:
     """
     Server-authoritative state tracker for an active Gemini Live session on a WebSocket.
     Manages state transitions, fallbacks, tool observability, and turn sequencing.
+    Enforces generational identity so stale receive tasks can never emit into newer sessions.
     """
-    def __init__(self, ws, slug: str, user_id: int, username: str, requested_model_id: str):
+    def __init__(self, ws, slug: str, user_id: int, username: str, requested_model_id: str, generation: int = 1, session_id: Optional[str] = None):
         self.ws = ws
         self.slug = slug
         self.user_id = user_id
@@ -224,6 +254,9 @@ class LiveSessionContext:
         self.requested_model_id = requested_model_id
         self.actual_model_id = requested_model_id
         self.actual_model_display = requested_model_id
+        self.generation: int = generation
+        self.session_id: str = session_id or uuid.uuid4().hex
+        self.is_active: bool = True
         self.state: LiveState = LiveState.DISCONNECTED
         self.session = None  # AsyncSession from google-genai
         self.cm = None       # Context manager from client.aio.live.connect
@@ -237,10 +270,19 @@ class LiveSessionContext:
         self.current_turn_id: int = 1
         self.screenshare = ScreenshareSubsystem()
 
+    def deactivate(self):
+        """Marks this session context as permanently inactive so it can never emit events or update state."""
+        self.is_active = False
+        self.state = LiveState.DISCONNECTED
+
     async def transition_to(self, new_state: LiveState, reason: Optional[str] = None):
         """
         Transitions the session to a new state and broadcasts the state change to the WebSocket.
+        Silently drops state changes if this session has been replaced or deactivated.
         """
+        if not self.is_active:
+            return False
+
         old_state = self.state
         self.state = new_state
         self.last_state_change = time.time()
@@ -257,6 +299,8 @@ class LiveSessionContext:
             "requested_model": self.requested_model_id,
             "actual_model": self.actual_model_id,
             "model_display": display_name,
+            "session_id": self.session_id,
+            "generation": self.generation,
             "timestamp": int(self.last_state_change),
             "reason": reason
         }
@@ -281,6 +325,7 @@ class LiveSessionContext:
                 await self.ws.send_json(compat_payload)
             except Exception:
                 pass
+        return True
 
 
 async def safe_execute_tool(

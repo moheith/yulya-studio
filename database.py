@@ -416,11 +416,32 @@ async def save_user_preference(user_id: int, key: str, value: any) -> bool:
 
 async def get_user_preferences(user_id: int) -> dict:
     """Retrieves server-stored model preferences for a user."""
-    profile = await get_user_profile(user_id) or {}
-    return {
-        "preferred_live_model": profile.get("preferred_live_model"),
-        "preferred_code_model": profile.get("preferred_code_model")
-    }
+    try:
+        profile = await get_user_profile(user_id) or {}
+    except Exception as e:
+        print(f"[DATABASE] Error retrieving preferences for user {user_id}: {e}")
+        profile = {}
+    prefs = {k: v for k, v in profile.items() if k not in ("_id", "password", "salt", "token", "studio_api_key")}
+    prefs.setdefault("preferred_live_model", profile.get("preferred_live_model"))
+    prefs.setdefault("preferred_code_model", profile.get("preferred_code_model"))
+    return prefs
+
+async def get_user_preference(user_id: int, key: str, default: any = None) -> any:
+    """
+    Retrieves a single server-stored preference for a user with safe fallback.
+    Returns the preference value or `default` when not found, profile missing, or DB offline.
+    Never crashes on missing fields or uninitialized database.
+    """
+    if not user_id:
+        return default
+    try:
+        profile = await get_user_profile(user_id) or {}
+        val = profile.get(key)
+        return val if val is not None else default
+    except Exception as e:
+        print(f"[DATABASE] Error retrieving preference '{key}' for user {user_id}: {e}")
+        return default
+
 
 async def list_user_projects(user_id: int):
     """Lists all projects owned by a specific user."""
@@ -455,10 +476,33 @@ async def get_project(user_id: int, slug: str):
     return proj
 
 async def get_project_by_username_and_slug(username: str, slug: str):
-    """Fetches a project by author username and slug."""
+    """Fetches a project by author username and slug with case-insensitive matching and profile user_id fallback."""
     if projects_col is None:
         return None
-    proj = await projects_col.find_one({"username": username.lower(), "slug": slug.lower()})
+    clean_user = username.strip().lower()
+    clean_slug = slug.strip().lower()
+
+    # 1. Direct lowercase match
+    proj = await projects_col.find_one({"username": clean_user, "slug": clean_slug})
+    if not proj:
+        # 2. Case-insensitive regex match on username and slug
+        proj = await projects_col.find_one({
+            "username": {"$regex": f"^{re.escape(clean_user)}$", "$options": "i"},
+            "slug": {"$regex": f"^{re.escape(clean_slug)}$", "$options": "i"}
+        })
+    if not proj and profiles_col is not None:
+        # 3. Fallback: find profile by username or login_id, then lookup project by user_id
+        prof = await profiles_col.find_one({"$or": [
+            {"username": clean_user},
+            {"login_id": clean_user},
+            {"username": {"$regex": f"^{re.escape(clean_user)}$", "$options": "i"}}
+        ]})
+        if prof and prof.get("user_id"):
+            uid = prof["user_id"]
+            proj = await get_project(uid, clean_slug)
+            if proj:
+                return proj
+
     if proj:
         proj["_id"] = str(proj["_id"])
     return proj
@@ -493,14 +537,15 @@ async def save_project(
     existing = await projects_col.find_one({"user_id": int(user_id), "slug": safe_slug})
     spectator_token = (existing.get("spectator_token") if existing else None) or secrets.token_urlsafe(16)
     
+    valid_tags = tags if isinstance(tags, list) else ["game", "canvas", "html5"]
     project_doc = {
         "user_id": int(user_id),
         "username": username.lower(),
         "slug": safe_slug,
         "title": title,
         "description": description or f"A game created by {username} with Yulya Studio.",
-        "tags": tags or ["game", "canvas", "html5"],
-        "is_public": is_public,
+        "tags": valid_tags,
+        "is_public": is_public if isinstance(is_public, bool) else True,
         "spectator_token": spectator_token,
         "updated_at": now
     }

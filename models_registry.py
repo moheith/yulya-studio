@@ -239,6 +239,17 @@ DEFAULT_LIVE_MODEL_ID = "gemini-3.8-live"
 DEFAULT_CODE_MODEL_ID = "gemini-3.8-flash"
 
 
+def get_default_live_model() -> str:
+    """Returns the default Live voice model ID."""
+    return DEFAULT_LIVE_MODEL_ID
+
+
+def get_default_code_model() -> str:
+    """Returns the default Antigravity code model ID."""
+    return DEFAULT_CODE_MODEL_ID
+
+
+
 def get_model(model_id: str) -> Optional[ModelEntry]:
     """Retrieves a model entry by ID (case-insensitive)."""
     if not model_id:

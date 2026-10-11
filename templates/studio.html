@@ -1875,7 +1875,9 @@
         if (seenTranscriptEventIds.size > 2000) seenTranscriptEventIds.clear();
       }
 
-      const turnId = data.turn_id || (data.speaker === 'user' ? 'legacy_user_turn' : 'legacy_ai_turn');
+      const turnId = data.turn_id;
+      if (!turnId) return;
+
       const speaker = data.speaker || 'ai';
       const delta = data.delta || '';
       const actualModel = data.model || formatVoiceModelName(selectedVoiceModel) || 'Gemini Live';
@@ -1883,11 +1885,18 @@
 
       const feed = document.getElementById('chatFeed');
       if (!feed) return;
-      const hint = document.getElementById('chatEmptyHint');
-      if (hint) hint.style.display = 'none';
 
       let turn = activeTurns[turnId];
       if (!turn) {
+        // Guard: If no turn exists and there is no text content (e.g. empty finalization packet),
+        // DO NOT create an empty bubble in the DOM!
+        if (!delta || !delta.trim()) {
+          return;
+        }
+
+        const hint = document.getElementById('chatEmptyHint');
+        if (hint) hint.style.display = 'none';
+
         const now = new Date();
         const time = now.toTimeString().split(' ')[0];
 
@@ -1924,8 +1933,13 @@
       }
 
       if (isFinal) {
-        if (turn.text.trim()) {
+        if (turn.text && turn.text.trim()) {
           chatHistory.push({ sender: speaker, text: turn.text.trim(), time: turn.time, model: turn.model });
+        } else {
+          // If turn somehow ended with empty text, cleanly remove from DOM
+          if (turn.row && turn.row.parentNode) {
+            turn.row.parentNode.removeChild(turn.row);
+          }
         }
         delete activeTurns[turnId];
       }
@@ -1958,45 +1972,6 @@
       row.appendChild(bubble);
       feed.appendChild(row);
       feed.scrollTop = feed.scrollHeight;
-    }
-
-    function appendUserChatText(chunk) {
-      if (!chunk) return;
-      handleTranscriptDelta({
-        turn_id: 'legacy_user_stream',
-        speaker: 'user',
-        delta: chunk,
-        is_final: false
-      });
-    }
-
-    function finalizeUserChatTurn() {
-      handleTranscriptDelta({
-        turn_id: 'legacy_user_stream',
-        speaker: 'user',
-        delta: '',
-        is_final: true
-      });
-    }
-
-    function appendAiChatText(chunk) {
-      if (!chunk) return;
-      handleTranscriptDelta({
-        turn_id: 'legacy_ai_stream',
-        speaker: 'ai',
-        delta: chunk,
-        model: formatVoiceModelName(selectedVoiceModel),
-        is_final: false
-      });
-    }
-
-    function finalizeAiChatTurn() {
-      handleTranscriptDelta({
-        turn_id: 'legacy_ai_stream',
-        speaker: 'ai',
-        delta: '',
-        is_final: true
-      });
     }
 
     // --- Live Text Messaging to Gemini Live ---
@@ -2317,8 +2292,10 @@
     const seenLogEventIds = new Set();
 
     function connectWS() {
-      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${proto}//${window.location.host}/ws/studio?slug=${ACTIVE_SLUG}&role=creator`;
+      const urlParams = new URLSearchParams(window.location.search);
+      const urlToken = urlParams.get('token');
+      const tokenQuery = urlToken ? `&token=${encodeURIComponent(urlToken)}` : '';
+      const wsUrl = `${proto}//${window.location.host}/ws/studio?slug=${ACTIVE_SLUG}&role=creator${tokenQuery}`;
 
       try {
         ws = new WebSocket(wsUrl);
@@ -2436,15 +2413,11 @@
                 logTerminal('[VOICE] Gemini Live turn complete.', 'voice');
               }
               setLiveStatus(voiceMode === 'continuous' ? 'Continuous Voice Active' : (formatVoiceModelName(selectedVoiceModel) + ' Ready'), voiceMode === 'continuous' ? 'listening' : 'online');
-              finalizeAiChatTurn();
-              finalizeUserChatTurn();
             } else if (data.type === 'ai_interrupted') {
               if (isAiSpeakingVoice) {
                 isAiSpeakingVoice = false;
               }
               liveAudioPlayer.stop();
-              finalizeAiChatTurn();
-              finalizeUserChatTurn();
               logTerminal('[LIVE_AI] Speech interrupted by user input', 'live');
             } else if (data.type === 'live_session_state') {
               const state = data.state;
@@ -2891,6 +2864,11 @@
         if (this.btn) this.btn.classList.remove('recording');
         if (this.label) this.label.textContent = 'Hold Space to Talk';
         stopWaveform();
+
+        // Physically release microphone hardware tracks and audio context
+        if (voiceMode === 'ptt') {
+          stopMicrophone();
+        }
 
         if (speechRecognizer && isSpeechRecognitionActive) {
           try {
