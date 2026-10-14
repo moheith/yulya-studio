@@ -67,7 +67,12 @@ async def test_repository_project_mock():
     mock_cursor.sort = MagicMock(return_value=mock_cursor)
     mock_projects.find = MagicMock(return_value=mock_cursor)
 
+    mock_profiles = AsyncMock()
+    mock_profiles.find_one = AsyncMock(return_value={"user_id": 100, "created_games": []})
+    mock_profiles.update_one = AsyncMock()
+
     client.projects_col = mock_projects
+    client.profiles_col = mock_profiles
 
     doc = await repositories.save_project(
         user_id=100,
