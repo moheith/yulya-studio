@@ -2,7 +2,10 @@
 __pycache__/
 *.pyc
 .DS_Store
-projects/
 *.log
 venv/
 .venv/
+.pytest_cache/
+frontend/node_modules/
+/projects/
+/data/projects/
