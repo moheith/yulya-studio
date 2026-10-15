@@ -11,17 +11,20 @@ from fastapi.responses import RedirectResponse, JSONResponse
 from backend.app.core.config import settings
 from backend.app.core.security import generate_session_token, enforce_rate_limit
 from backend.app.core.errors import AppError, ErrorCategory
+from backend.app.core.logging import logger
 from backend.app.database import repositories
 
 router = APIRouter(prefix="", tags=["Auth"])
 
 
+import secrets
+
 async def get_current_user(request: Request) -> Optional[dict]:
-    """Dependency for extracting authenticated user from HttpOnly session cookie."""
+    """
+    Dependency for extracting authenticated user strictly from HttpOnly session cookie.
+    Query parameter tokens are rejected to prevent token leakage in URLs and browser histories.
+    """
     token = request.cookies.get(settings.COOKIE_NAME)
-    if not token:
-        # Also check query param fallback for non-cookie contexts
-        token = request.query_params.get("token")
     if not token:
         return None
 
@@ -40,18 +43,52 @@ async def require_auth(user: Optional[dict] = Depends(get_current_user)) -> dict
 
 @router.get("/auth/login")
 async def handle_login():
-    """Redirects user to Discord OAuth2 authorization."""
+    """
+    Redirects user to Discord OAuth2 authorization with cryptographically secure state
+    parameter for anti-CSRF protection.
+    """
     if not settings.DISCORD_CLIENT_ID:
         # Mock/dev login fallback if Discord Client ID is not configured
         return RedirectResponse(url="/")
-    return RedirectResponse(url=settings.discord_oauth_url)
+
+    # Generate one-time OAuth state
+    oauth_state = secrets.token_urlsafe(32)
+    oauth_url = f"{settings.discord_oauth_url}&state={oauth_state}"
+    resp = RedirectResponse(url=oauth_url, status_code=302)
+    resp.set_cookie(
+        key="yulya_oauth_state",
+        value=oauth_state,
+        max_age=600,
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite="lax",
+        path="/"
+    )
+    return resp
 
 
 @router.get("/auth/callback")
-async def handle_auth_callback(code: Optional[str] = Query(None)):
-    """Handles OAuth2 code exchange with Discord API."""
+async def handle_auth_callback(
+    request: Request,
+    code: Optional[str] = Query(None),
+    state: Optional[str] = Query(None)
+):
+    """
+    Handles OAuth2 code exchange with Discord API with strict state validation
+    and immediate single-use consumption.
+    """
     if not code:
         return RedirectResponse(url="/")
+
+    # Anti-CSRF OAuth State Validation
+    cookie_state = request.cookies.get("yulya_oauth_state")
+    if not cookie_state or not state or cookie_state != state:
+        logger.warning("[AUTH] OAuth state validation failed or expired. Aborting authentication.")
+        raise AppError(
+            ErrorCategory.AUTHENTICATION,
+            "Invalid or expired OAuth state parameter (anti-CSRF validation failed).",
+            status_code=403
+        )
 
     enforce_rate_limit("auth_callback", "global", max_req=20, window_sec=60)
 
@@ -110,6 +147,7 @@ async def handle_auth_callback(code: Optional[str] = Query(None)):
             samesite="lax",
             path="/"
         )
+        resp.delete_cookie(key="yulya_oauth_state", path="/")
         return resp
 
     except Exception as e:
@@ -128,10 +166,11 @@ async def handle_logout(request: Request):
 
 
 @router.get("/api/me")
+@router.get("/api/auth/me")
 async def api_get_me(user: Optional[dict] = Depends(get_current_user)):
     """Returns currently authenticated user profile without sensitive credentials."""
     if not user:
-        return {"authenticated": False}
+        return {"authenticated": False, "user": None}
 
     profile = await repositories.get_profile_by_user_id(user["id"])
     has_api_key = False

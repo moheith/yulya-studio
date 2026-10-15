@@ -363,6 +363,57 @@ export const Header: React.FC<HeaderProps> = ({
           <span>Share</span>
         </button>
 
+        {currentUser ? (
+          <div
+            onClick={() => onSwitchView('profile')}
+            title={`Logged in as ${currentUser.display_name || currentUser.username}`}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              backgroundColor: 'var(--bg-elevated)',
+              border: '1px solid var(--border-subtle)',
+              padding: '3px 8px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '12px',
+              color: 'var(--text-primary)',
+            }}
+          >
+            {currentUser.avatar ? (
+              <img
+                src={currentUser.avatar}
+                alt={currentUser.username}
+                style={{ width: '18px', height: '18px', borderRadius: '50%' }}
+              />
+            ) : (
+              <UserIcon size={13} color="var(--accent-primary)" />
+            )}
+            <span style={{ maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {currentUser.display_name || currentUser.username}
+            </span>
+          </div>
+        ) : (
+          <a
+            href="/auth/login"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              backgroundColor: 'rgba(88, 101, 242, 0.15)',
+              border: '1px solid rgba(88, 101, 242, 0.4)',
+              color: '#5865F2',
+              padding: '4px 10px',
+              borderRadius: '6px',
+              fontSize: '12px',
+              fontWeight: 600,
+              textDecoration: 'none',
+            }}
+          >
+            <span>Sign In</span>
+          </a>
+        )}
+
         <button
           onClick={onOpenSettings}
           title="Settings & API Key"

@@ -4,10 +4,11 @@ import { Terminal as TerminalIcon, Trash2 } from 'lucide-react';
 
 interface TerminalProps {
   logs: ActivityLog[];
+  height?: number;
   onClearLogs: () => void;
 }
 
-export const Terminal: React.FC<TerminalProps> = ({ logs, onClearLogs }) => {
+export const Terminal: React.FC<TerminalProps> = ({ logs, height, onClearLogs }) => {
   const [filter, setFilter] = useState<'all' | 'ai' | 'build' | 'error'>('all');
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -45,7 +46,7 @@ export const Terminal: React.FC<TerminalProps> = ({ logs, onClearLogs }) => {
   return (
     <div
       style={{
-        height: '140px',
+        height: height !== undefined ? `${height}px` : '140px',
         backgroundColor: 'var(--bg-base)',
         borderTop: '1px solid var(--border-subtle)',
         display: 'flex',

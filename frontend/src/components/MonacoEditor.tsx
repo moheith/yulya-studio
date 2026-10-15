@@ -28,6 +28,8 @@ export const MonacoEditor: React.FC<MonacoEditorProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const editorInstanceRef = useRef<any>(null);
+  const modelsRef = useRef<Record<string, any>>({});
+  const isProgrammaticUpdateRef = useRef<boolean>(false);
   const [monacoLoaded, setMonacoLoaded] = useState(false);
 
   const getLanguage = (fileName: string) => {
@@ -35,6 +37,7 @@ export const MonacoEditor: React.FC<MonacoEditorProps> = ({
     if (fileName.endsWith('.css')) return 'css';
     if (fileName.endsWith('.js') || fileName.endsWith('.mjs')) return 'javascript';
     if (fileName.endsWith('.json')) return 'json';
+    if (fileName.endsWith('.md')) return 'markdown';
     return 'plaintext';
   };
 
@@ -62,12 +65,74 @@ export const MonacoEditor: React.FC<MonacoEditorProps> = ({
         },
       });
       win.require(['vs/editor/editor.main'], () => {
+        // Define professional graphite theme
+        try {
+          win.monaco.editor.defineTheme('yulya-graphite', {
+            base: 'vs-dark',
+            inherit: true,
+            rules: [],
+            colors: {
+              'editor.background': '#0d0e12',
+              'editorGutter.background': '#090a0d',
+              'editorLineNumber.foreground': '#4b5563',
+              'editorLineNumber.activeForeground': '#9ca3af',
+              'editorCursor.foreground': '#60a5fa',
+              'editor.selectionBackground': '#2b2f3a',
+              'editor.lineHighlightBackground': '#16181f',
+            },
+          });
+        } catch {
+          // Theme already defined
+        }
         setMonacoLoaded(true);
       });
     }
   }, [monacoLoaded]);
 
-  // Mount/Update editor instance
+  // Create or get Monaco ITextModel per file
+  const getOrCreateTextModel = (win: any, fileName: string, initialContent: string) => {
+    if (!win.monaco) return null;
+    let model = modelsRef.current[fileName];
+    if (model && !model.isDisposed()) {
+      return model;
+    }
+
+    const uri = win.monaco.Uri.parse(`inmemory://project/${fileName}`);
+    model = win.monaco.editor.getModel(uri);
+    if (!model) {
+      model = win.monaco.editor.createModel(initialContent, getLanguage(fileName), uri);
+    }
+
+    // Attach file-scoped change listener (eliminates stale closures)
+    model.onDidChangeContent(() => {
+      if (isProgrammaticUpdateRef.current) return;
+      const val = model.getValue();
+      onChangeContent(fileName, val);
+    });
+
+    modelsRef.current[fileName] = model;
+    return model;
+  };
+
+  // Sync incoming file content from props to models if not dirty
+  useEffect(() => {
+    const win = window as any;
+    if (!monacoLoaded || !win.monaco) return;
+
+    Object.entries(files).forEach(([fName, content]) => {
+      let model = modelsRef.current[fName];
+      if (!model) {
+        model = getOrCreateTextModel(win, fName, content);
+      } else if (!dirtyFiles.has(fName) && model.getValue() !== content) {
+        // Sync server-saved content without triggering dirty change
+        isProgrammaticUpdateRef.current = true;
+        model.setValue(content);
+        isProgrammaticUpdateRef.current = false;
+      }
+    });
+  }, [files, dirtyFiles, monacoLoaded]);
+
+  // Mount Monaco editor instance and swap models on activeFile change
   useEffect(() => {
     if (!monacoLoaded || !containerRef.current || diffView) return;
 
@@ -75,10 +140,11 @@ export const MonacoEditor: React.FC<MonacoEditorProps> = ({
     if (!win.monaco) return;
 
     if (!editorInstanceRef.current) {
+      const activeModel = getOrCreateTextModel(win, activeFile, files[activeFile] || '');
+
       editorInstanceRef.current = win.monaco.editor.create(containerRef.current, {
-        value: files[activeFile] || '',
-        language: getLanguage(activeFile),
-        theme: 'vs-dark',
+        model: activeModel,
+        theme: 'yulya-graphite',
         fontFamily: "'JetBrains Mono', monospace",
         fontSize: 13,
         lineNumbers: 'on',
@@ -88,20 +154,11 @@ export const MonacoEditor: React.FC<MonacoEditorProps> = ({
         tabSize: 2,
         renderLineHighlight: 'all',
       });
-
-      editorInstanceRef.current.onDidChangeModelContent(() => {
-        const val = editorInstanceRef.current.getValue();
-        onChangeContent(activeFile, val);
-      });
     } else {
-      const currentVal = editorInstanceRef.current.getValue();
-      const targetVal = files[activeFile] || '';
-      if (currentVal !== targetVal) {
-        editorInstanceRef.current.setValue(targetVal);
-      }
-      const model = editorInstanceRef.current.getModel();
-      if (model) {
-        win.monaco.editor.setModelLanguage(model, getLanguage(activeFile));
+      const currentModel = editorInstanceRef.current.getModel();
+      const targetModel = getOrCreateTextModel(win, activeFile, files[activeFile] || '');
+      if (targetModel && currentModel !== targetModel) {
+        editorInstanceRef.current.setModel(targetModel);
       }
     }
   }, [monacoLoaded, activeFile, diffView]);

@@ -18,6 +18,7 @@ import {
   publishRelease,
   fetchCommunityProjects,
   fetchModels,
+  fetchCurrentUser,
 } from './services/api';
 import { AudioStreamer } from './services/audioStreamer';
 import { Header } from './components/Header';
@@ -36,11 +37,7 @@ export const App: React.FC = () => {
   const [activeView, setActiveView] = useState<'studio' | 'arcade' | 'profile'>('studio');
 
   // User & Projects
-  const [currentUser, setCurrentUser] = useState<User | null>({
-    id: 1,
-    username: 'creator',
-    display_name: 'Creator',
-  });
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
   const [communityProjects, setCommunityProjects] = useState<Project[]>([]);
@@ -72,6 +69,56 @@ export const App: React.FC = () => {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
+  // Resizable Panels State
+  const [leftWidth, setLeftWidth] = useState<number>(220);
+  const [rightWidth, setRightWidth] = useState<number>(420);
+  const [terminalHeight, setTerminalHeight] = useState<number>(140);
+  const [resizing, setResizing] = useState<'left' | 'right' | 'terminal' | null>(null);
+
+  const startResizeLeft = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setResizing('left');
+  };
+
+  const startResizeRight = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setResizing('right');
+  };
+
+  const startResizeTerminal = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setResizing('terminal');
+  };
+
+  useEffect(() => {
+    if (!resizing) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (resizing === 'left') {
+        const newW = Math.max(160, Math.min(e.clientX, 500));
+        setLeftWidth(newW);
+      } else if (resizing === 'right') {
+        const newW = Math.max(280, Math.min(window.innerWidth - e.clientX, 800));
+        setRightWidth(newW);
+      } else if (resizing === 'terminal') {
+        const chatBarHeight = 52;
+        const newH = Math.max(70, Math.min(window.innerHeight - e.clientY - chatBarHeight, 500));
+        setTerminalHeight(newH);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setResizing(null);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [resizing]);
+
   // References
   const wsRef = useRef<WebSocket | null>(null);
   const audioStreamerRef = useRef<AudioStreamer | null>(null);
@@ -94,9 +141,23 @@ export const App: React.FC = () => {
     }, 4000);
   }, []);
 
-  // 1. Initial Load: Models, Projects, and Gallery
+  // 1. Initial Load: User, Models, Projects, and Gallery
   useEffect(() => {
     const initData = async () => {
+      try {
+        const userRes = await fetchCurrentUser();
+        if (userRes.authenticated && userRes.user) {
+          setCurrentUser({
+            id: userRes.user.id,
+            username: userRes.user.username,
+            display_name: userRes.user.display_name || userRes.user.username,
+            avatar: userRes.user.avatar,
+          });
+        }
+      } catch (err) {
+        console.warn('Could not load current user:', err);
+      }
+
       try {
         const modelData = await fetchModels();
         if (modelData.live_models) setLiveModels(modelData.live_models);
@@ -477,20 +538,56 @@ export const App: React.FC = () => {
         />
       ) : (
         /* Studio IDE View */
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
+          {/* Global transparent drag overlay to prevent iframe stealing mouse events */}
+          {resizing && (
+            <div
+              style={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                zIndex: 9999,
+                cursor: resizing === 'terminal' ? 'row-resize' : 'col-resize',
+                userSelect: 'none',
+              }}
+            />
+          )}
+
           <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
             {/* Left: File Explorer */}
             <FileTree
               files={files}
               activeFile={activeFile}
               dirtyFiles={dirtyFiles}
+              width={leftWidth}
               onSelectFile={handleSelectFile}
               onCreateFile={handleCreateFile}
               onDeleteFile={handleDeleteFile}
               onDownloadZip={() => {
                 if (currentProject) {
-                  window.open(`/api/download-zip/${currentUser?.username}/${currentProject.slug}`, '_blank');
+                  window.open(`/api/download-zip/${currentUser?.username || 'creator'}/${currentProject.slug}`, '_blank');
                 }
+              }}
+            />
+
+            {/* Draggable Vertical Splitter: FileTree <-> MonacoEditor */}
+            <div
+              onMouseDown={startResizeLeft}
+              style={{
+                width: '4px',
+                cursor: 'col-resize',
+                backgroundColor: resizing === 'left' ? 'var(--accent-primary)' : 'var(--border-subtle)',
+                transition: 'background-color 0.15s ease',
+                zIndex: 10,
+                flexShrink: 0,
+              }}
+              onMouseEnter={(e) => {
+                if (!resizing) (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--accent-primary)';
+              }}
+              onMouseLeave={(e) => {
+                if (resizing !== 'left') (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--border-subtle)';
               }}
             />
 
@@ -508,11 +605,31 @@ export const App: React.FC = () => {
               onCloseDiff={() => setDiffView(null)}
             />
 
+            {/* Draggable Vertical Splitter: MonacoEditor <-> PreviewPane */}
+            <div
+              onMouseDown={startResizeRight}
+              style={{
+                width: '4px',
+                cursor: 'col-resize',
+                backgroundColor: resizing === 'right' ? 'var(--accent-primary)' : 'var(--border-subtle)',
+                transition: 'background-color 0.15s ease',
+                zIndex: 10,
+                flexShrink: 0,
+              }}
+              onMouseEnter={(e) => {
+                if (!resizing) (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--accent-primary)';
+              }}
+              onMouseLeave={(e) => {
+                if (resizing !== 'right') (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--border-subtle)';
+              }}
+            />
+
             {/* Right: Live Sandboxed Game Preview */}
             <PreviewPane
               username={currentUser?.username || 'creator'}
               slug={currentProject?.slug || 'neon-dodge'}
               previewKey={previewKey}
+              width={rightWidth}
               onRestart={() => setPreviewKey((k) => k + 1)}
               onSendScreenshareFrame={(b64) => {
                 if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -525,8 +642,27 @@ export const App: React.FC = () => {
             />
           </div>
 
+          {/* Draggable Horizontal Splitter: Workspace <-> Terminal */}
+          <div
+            onMouseDown={startResizeTerminal}
+            style={{
+              height: '4px',
+              cursor: 'row-resize',
+              backgroundColor: resizing === 'terminal' ? 'var(--accent-primary)' : 'var(--border-subtle)',
+              transition: 'background-color 0.15s ease',
+              zIndex: 10,
+              flexShrink: 0,
+            }}
+            onMouseEnter={(e) => {
+              if (!resizing) (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--accent-primary)';
+            }}
+            onMouseLeave={(e) => {
+              if (resizing !== 'terminal') (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--border-subtle)';
+            }}
+          />
+
           {/* Bottom Dock: Activity Terminal */}
-          <Terminal logs={logs} onClearLogs={() => setLogs([])} />
+          <Terminal logs={logs} height={terminalHeight} onClearLogs={() => setLogs([])} />
 
           {/* Bottom Control Bar: Voice & Prompts */}
           <VoiceAndChatBar

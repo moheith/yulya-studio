@@ -37,16 +37,53 @@ def test_settings_initialization(tmp_path):
 
 
 def test_fernet_envelope_encryption_roundtrip():
-    """Verifies that API keys and secrets encrypt and decrypt accurately at rest."""
+    """Verifies that API keys and secrets encrypt and decrypt accurately at rest with enc_v2."""
+    from backend.app.core.security import migrate_encrypted_secret, _get_legacy_v1_fernet
     raw_key = "AIzaSyFakeGoogleApiKey1234567890abcdef"
 
     encrypted = encrypt_secret(raw_key)
     assert encrypted != raw_key
-    assert encrypted.startswith("enc_v1:")
+    assert encrypted.startswith("enc_v2:")
     assert len(encrypted) > 20
 
     decrypted = decrypt_secret(encrypted)
     assert decrypted == raw_key
+
+    # Test backward compatibility with legacy enc_v1 format
+    legacy_fernet = _get_legacy_v1_fernet()
+    enc_v1_ciphertext = "enc_v1:" + legacy_fernet.encrypt(raw_key.encode("utf-8")).decode("utf-8")
+    assert decrypt_secret(enc_v1_ciphertext) == raw_key
+
+    # Test migration from enc_v1 to enc_v2
+    migrated = migrate_encrypted_secret(enc_v1_ciphertext)
+    assert migrated.startswith("enc_v2:")
+    assert decrypt_secret(migrated) == raw_key
+
+
+def test_production_secret_enforcement():
+    """Verifies that Settings rejects missing, weak or placeholder SESSION_SECRET in production."""
+    from pydantic import ValidationError
+    from backend.app.core.config import Settings
+
+    # In production, default/placeholder secret must fail fast
+    with pytest.raises((ValueError, ValidationError)):
+        Settings(
+            ENVIRONMENT="production",
+            SESSION_SECRET="yulya_v2_default_secret_key_change_in_production"
+        )
+
+    with pytest.raises((ValueError, ValidationError)):
+        Settings(
+            ENVIRONMENT="production",
+            SESSION_SECRET="short_secret"
+        )
+
+    # Valid >= 32 char production secret succeeds
+    valid_prod = Settings(
+        ENVIRONMENT="production",
+        SESSION_SECRET="prod_strong_session_secret_with_sufficient_entropy_64chars"
+    )
+    assert valid_prod.ENVIRONMENT == "production"
 
 
 def test_fernet_legacy_plaintext_compatibility():

@@ -66,6 +66,11 @@ class PublishReleaseRequest(BaseModel):
     changelog: Optional[str] = Field("", max_length=2000)
 
 
+class RollbackReleaseRequest(BaseModel):
+    slug: str = Field(..., min_length=1, max_length=60)
+    target_version: int = Field(..., ge=1)
+
+
 class ReleaseSummary(BaseModel):
     version: int
     slug: str

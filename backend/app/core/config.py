@@ -17,10 +17,12 @@ class Settings(BaseSettings):
     )
 
     # Server & Network
+    ENVIRONMENT: str = "development"
     PORT: int = 10000
     HOST: str = "0.0.0.0"
     BASE_URL: str = "https://project.yulya.me"
     SESSION_SECRET: str = "yulya_studio_secret_key_2026_super_secure"
+    ENCRYPTION_KEY: Optional[str] = None  # Dedicated API key encryption key
     COOKIE_NAME: str = "yulya_studio_session"
     COOKIE_SECURE: bool = False  # Set dynamically in model_post_init or based on BASE_URL
 
@@ -38,6 +40,7 @@ class Settings(BaseSettings):
     BASE_DIR: Path = Path(__file__).resolve().parent.parent.parent.parent
     DATA_DIR: Path = Path(__file__).resolve().parent.parent.parent.parent / "data"
     PROJECTS_DIR: Path = Path(__file__).resolve().parent.parent.parent.parent / "data" / "projects"
+    RELEASES_DIR: Path = Path(__file__).resolve().parent.parent.parent.parent / "data" / "releases"
     STATIC_DIR: Path = Path(__file__).resolve().parent.parent.parent.parent / "static"
     FRONTEND_DIST_DIR: Path = Path(__file__).resolve().parent.parent.parent.parent / "frontend" / "dist"
 
@@ -87,7 +90,28 @@ class Settings(BaseSettings):
         self.BASE_URL = self.BASE_URL.rstrip("/")
         if self.BASE_URL.startswith("https://"):
             self.COOKIE_SECURE = True
+
+        # Enforce strict production secret security (fail fast on weak / placeholder secrets)
+        is_prod = (
+            self.ENVIRONMENT.lower() in {"production", "prod", "staging"}
+            or os.environ.get("RENDER") == "true"
+            or ("onrender.com" in self.BASE_URL and "localhost" not in self.BASE_URL)
+        )
+        if is_prod:
+            placeholder_patterns = ["change_in_production", "change_me", "placeholder", "super_secure", "default_secret"]
+            is_placeholder = any(pat in self.SESSION_SECRET.lower() for pat in placeholder_patterns)
+            if not self.SESSION_SECRET or is_placeholder:
+                raise ValueError(
+                    "CRITICAL SECURITY CONFIGURATION ERROR: Predictable, default, or placeholder SESSION_SECRET "
+                    "detected in production. A high-entropy production secret (>= 32 chars) must be provided."
+                )
+            if len(self.SESSION_SECRET) < 32:
+                raise ValueError(
+                    "CRITICAL SECURITY CONFIGURATION ERROR: SESSION_SECRET must be at least 32 characters in production."
+                )
+
         self.PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
+        self.RELEASES_DIR.mkdir(parents=True, exist_ok=True)
         self.STATIC_DIR.mkdir(parents=True, exist_ok=True)
 
     @property

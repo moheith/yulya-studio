@@ -7,6 +7,8 @@ import os
 import io
 import shutil
 import zipfile
+import json
+import hashlib
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime, timezone
@@ -516,3 +518,89 @@ def export_project_zip(user_id: int, slug: str) -> io.BytesIO:
 
     zip_buffer.seek(0)
     return zip_buffer
+
+
+def create_release_snapshot(
+    user_id: int,
+    slug: str,
+    version: int,
+    title: str,
+    description: str,
+    changelog: str
+) -> Dict[str, Any]:
+    """
+    Creates an immutable filesystem snapshot of the current working project into
+    settings.RELEASES_DIR / str(user_id) / slug / f"v{version}".
+    Calculates SHA-256 for all valid files and generates a release_manifest.json.
+    """
+    safe_slug = validate_slug(slug)
+    project_dir = resolve_project_path(user_id, safe_slug)
+    if not project_dir.exists():
+        raise AppError(ErrorCategory.INVALID_INPUT, f"Project '{slug}' does not exist.")
+
+    release_dir = (settings.RELEASES_DIR / str(user_id) / safe_slug / f"v{version}").resolve()
+    if release_dir.exists():
+        shutil.rmtree(release_dir)
+    release_dir.mkdir(parents=True, exist_ok=True)
+
+    file_hashes: Dict[str, str] = {}
+    copied_files: List[str] = []
+    total_bytes = 0
+
+    for path in project_dir.rglob("*"):
+        if path.is_file():
+            rel_path = path.relative_to(project_dir).as_posix()
+            ext = path.suffix.lower()
+            if ext in settings.ALLOWED_GAME_EXTENSIONS:
+                dst_path = release_dir / rel_path
+                dst_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(path, dst_path)
+
+                h = hashlib.sha256()
+                with open(dst_path, "rb") as f:
+                    while chunk := f.read(65536):
+                        h.update(chunk)
+                file_hash = h.hexdigest()
+                file_hashes[rel_path] = file_hash
+                copied_files.append(rel_path)
+                total_bytes += dst_path.stat().st_size
+
+    manifest = {
+        "version": version,
+        "slug": safe_slug,
+        "title": title,
+        "description": description,
+        "changelog": changelog,
+        "published_at": datetime.now(timezone.utc).isoformat(),
+        "total_bytes": total_bytes,
+        "file_hashes": file_hashes,
+        "files": copied_files
+    }
+    (release_dir / "release_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return manifest
+
+
+def resolve_release_file_path(user_id: int, slug: str, version: int, relative_path: str) -> Path:
+    """
+    Safely resolves a file within a versioned immutable release directory,
+    guaranteeing strict path containment.
+    """
+    safe_slug = validate_slug(slug)
+    base_release = (settings.RELEASES_DIR / str(user_id) / safe_slug / f"v{version}").resolve()
+    if not base_release.exists():
+        raise AppError(ErrorCategory.INVALID_INPUT, f"Release v{version} for '{slug}' not found.")
+
+    clean_rel = relative_path.strip().replace("\\", "/").lstrip("/")
+    if not clean_rel or clean_rel == ".":
+        clean_rel = "index.html"
+
+    if any(p in clean_rel for p in ["..", "%", "\0"]):
+        raise AppError(ErrorCategory.PERMISSION_DENIED, "Path traversal attempt detected in release file path.")
+
+    target = (base_release / clean_rel).resolve()
+    try:
+        target.relative_to(base_release)
+    except ValueError:
+        raise AppError(ErrorCategory.PERMISSION_DENIED, "Path traversal attempt detected: escapes release directory.")
+
+    return target

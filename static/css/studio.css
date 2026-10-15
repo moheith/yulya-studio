@@ -1,26 +1,26 @@
 /* Yulya Studio — Unified Design Tokens & Core Stylesheet */
 :root {
-  --bg-deepest: #050110;
-  --bg-base: #0a0518;
-  --bg-elevated: #0f0724;
-  --bg-overlay: rgba(13, 6, 32, 0.95);
+  --bg-deepest: #0d0e12;
+  --bg-base: #131419;
+  --bg-elevated: #1a1c23;
+  --bg-overlay: rgba(19, 20, 25, 0.95);
 
-  --border-subtle: rgba(120, 80, 160, 0.15);
-  --border-active: rgba(120, 80, 160, 0.35);
+  --border-subtle: #2b2f3a;
+  --border-active: #3e4453;
 
-  --accent-primary: #8b5cf6;
-  --accent-primary-hover: #9d74f7;
+  --accent-primary: #3b82f6;
+  --accent-primary-hover: #2563eb;
   --accent-blue: #38bdf8;
-  --accent-green: #34d399;
+  --accent-green: #10b981;
   --accent-rose: #f43f5e;
-  --accent-amber: #fbbf24;
+  --accent-amber: #f59e0b;
   --accent-pink: #ec4899;
 
-  --text-primary: #f0eef6;
-  --text-secondary: #9590a8;
-  --text-tertiary: #6b6580;
+  --text-primary: #f3f4f6;
+  --text-secondary: #9ca3af;
+  --text-tertiary: #6b7280;
 
-  --glow-purple: rgba(139, 92, 246, 0.15);
+  --glow-purple: rgba(59, 130, 246, 0.15);
   --glow-blue: rgba(56, 189, 248, 0.12);
 
   --radius-sm: 6px;

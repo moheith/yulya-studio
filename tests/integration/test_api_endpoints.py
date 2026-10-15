@@ -49,16 +49,20 @@ def test_unauthorized_access_rejected(client_app):
 
 def test_sandboxed_preview_security_headers(client_app, tmp_path, monkeypatch):
     """
-    Verifies that game preview responses contain strict CSP headers,
-    nosniff, and frame-ancestors restrictions (Section 27).
+    Verifies that:
+    1. Unauthenticated users cannot view private unreleased drafts (403 Forbidden).
+    2. Published releases serve verified immutable snapshots with strict CSP headers (no unsafe-eval, nosniff, frame-ancestors).
     """
     projects_root = tmp_path / "projects"
     projects_root.mkdir()
+    releases_root = tmp_path / "releases"
+    releases_root.mkdir()
     monkeypatch.setattr(settings, "PROJECTS_DIR", projects_root)
+    monkeypatch.setattr(settings, "RELEASES_DIR", releases_root)
 
-    # Mock database to return project for username "tester" and slug "test-game"
     from unittest.mock import AsyncMock
     from backend.app.database import repositories
+    from backend.app.projects.service import create_release_snapshot
 
     monkeypatch.setattr(
         repositories,
@@ -74,10 +78,27 @@ def test_sandboxed_preview_security_headers(client_app, tmp_path, monkeypatch):
     # Initialize starter game files on disk
     service.init_starter_project(777, "test-game", "Test Game")
 
+    # 1. Unauthenticated request to private unreleased draft -> must return 403 Forbidden
+    monkeypatch.setattr(repositories, "get_active_release", AsyncMock(return_value=None))
+    resp = client_app.get("/tester/test-game/")
+    assert resp.status_code == 403
+
+    # 2. Published release -> public requests succeed with 200 and strict CSP
+    snapshot = create_release_snapshot(777, "test-game", 1, "Test Game", "v1", "Initial release")
+    monkeypatch.setattr(repositories, "get_active_release", AsyncMock(return_value={
+        "user_id": 777,
+        "username": "tester",
+        "slug": "test-game",
+        "version": 1,
+        "manifest": snapshot
+    }))
+
     resp = client_app.get("/tester/test-game/")
     assert resp.status_code == 200
     assert "Content-Security-Policy" in resp.headers
-    assert "default-src 'self'" in resp.headers["Content-Security-Policy"]
+    csp = resp.headers["Content-Security-Policy"]
+    assert "default-src 'self'" in csp
+    assert "'unsafe-eval'" not in csp  # Verified: unsafe-eval is forbidden
     assert "nosniff" in resp.headers.get("X-Content-Type-Options", "")
     assert "<!DOCTYPE html>" in resp.text
 

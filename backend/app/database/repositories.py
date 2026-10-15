@@ -434,9 +434,11 @@ async def publish_release(
     description: str,
     files: List[str],
     changelog: str = "",
-    version: Optional[int] = None
+    version: Optional[int] = None,
+    file_hashes: Optional[Dict[str, str]] = None,
+    total_bytes: int = 0
 ) -> Dict[str, Any]:
-    """Publishes an immutable public release snapshot."""
+    """Publishes an immutable public release snapshot with verified file hashes."""
     if client.releases_col is None:
         raise RuntimeError("Database not connected")
 
@@ -467,6 +469,8 @@ async def publish_release(
         "description": description,
         "version": version,
         "files": files,
+        "file_hashes": file_hashes or {},
+        "total_bytes": total_bytes,
         "changelog": changelog,
         "is_active": True,
         "published_at": now
@@ -474,6 +478,44 @@ async def publish_release(
     await client.releases_col.insert_one(release_doc)
     release_doc["_id"] = str(release_doc.get("_id", ""))
     return release_doc
+
+
+async def rollback_release(user_id: int, slug: str, target_version: int) -> Optional[Dict[str, Any]]:
+    """Rolls back the active release to an existing historical version."""
+    if client.releases_col is None:
+        return None
+    user_id_int = int(user_id)
+    safe_slug = re.sub(r'[^a-zA-Z0-9_-]', '', slug).lower()
+
+    target = await client.releases_col.find_one({"user_id": user_id_int, "slug": safe_slug, "version": target_version})
+    if not target:
+        return None
+
+    # Deactivate all versions
+    await client.releases_col.update_many(
+        {"user_id": user_id_int, "slug": safe_slug},
+        {"$set": {"is_active": False}}
+    )
+    # Activate target
+    await client.releases_col.update_one(
+        {"_id": target["_id"]},
+        {"$set": {"is_active": True}}
+    )
+    target["is_active"] = True
+    target["_id"] = str(target["_id"])
+    return target
+
+
+async def get_release_by_version(user_id: int, slug: str, version: int) -> Optional[Dict[str, Any]]:
+    """Retrieves a specific historical release version."""
+    if client.releases_col is None:
+        return None
+    user_id_int = int(user_id)
+    safe_slug = re.sub(r'[^a-zA-Z0-9_-]', '', slug).lower()
+    doc = await client.releases_col.find_one({"user_id": user_id_int, "slug": safe_slug, "version": version})
+    if doc:
+        doc["_id"] = str(doc.get("_id", ""))
+    return doc
 
 
 async def get_active_release(username: str, slug: str) -> Optional[Dict[str, Any]]:

@@ -17,6 +17,7 @@ interface FileTreeProps {
   files: Record<string, string>;
   activeFile: string;
   dirtyFiles: Set<string>;
+  width?: number;
   onSelectFile: (fileName: string) => void;
   onCreateFile: (fileName: string) => void;
   onDeleteFile: (fileName: string) => void;
@@ -27,6 +28,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
   files,
   activeFile,
   dirtyFiles,
+  width,
   onSelectFile,
   onCreateFile,
   onDeleteFile,
@@ -59,7 +61,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
   return (
     <div
       style={{
-        width: '220px',
+        width: width !== undefined ? `${width}px` : '220px',
         height: '100%',
         backgroundColor: 'var(--bg-base)',
         borderRight: '1px solid var(--border-subtle)',

@@ -74,6 +74,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount static and frontend assets
+if settings.STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(settings.STATIC_DIR)), name="static")
+
+dist_assets = settings.FRONTEND_DIST_DIR / "assets"
+if dist_assets.exists():
+    app.mount("/assets", StaticFiles(directory=str(dist_assets)), name="assets")
+
 # Mount Routers
 app.include_router(routes_auth.router)
 app.include_router(routes_projects.router)
@@ -83,10 +91,6 @@ app.include_router(routes_models.router)
 app.include_router(routes_health.router)
 app.include_router(ws_studio.router)
 app.include_router(routes_preview.router)
-
-# Mount static files
-if settings.STATIC_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(settings.STATIC_DIR)), name="static")
 
 
 # Serve Frontend SPA

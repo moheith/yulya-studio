@@ -1,4 +1,4 @@
-import { Project, ModelEntry } from '../types';
+import type { Project, ModelEntry } from '../types.ts';
 
 export async function fetchHealth(): Promise<any> {
   const res = await fetch('/api/health');
@@ -103,4 +103,31 @@ export async function fetchCreatorProfile(username: string): Promise<{ success: 
   const res = await fetch(`/api/profile/${encodeURIComponent(username)}`);
   if (!res.ok) throw new Error('Failed to load creator profile');
   return res.json();
+}
+
+export async function fetchCurrentUser(): Promise<{ authenticated: boolean; user?: any; profile?: any; has_api_key?: boolean }> {
+  try {
+    const res = await fetch('/api/auth/me');
+    if (!res.ok) return { authenticated: false };
+    return res.json();
+  } catch {
+    return { authenticated: false };
+  }
+}
+
+export async function fetchProjectReleases(slug: string): Promise<{ success: boolean; releases: any[] }> {
+  const res = await fetch(`/api/releases/${encodeURIComponent(slug)}`);
+  if (!res.ok) throw new Error('Failed to load project releases');
+  return res.json();
+}
+
+export async function rollbackRelease(slug: string, targetVersion: number): Promise<any> {
+  const res = await fetch('/api/releases/rollback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug, target_version: targetVersion }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || 'Failed to rollback release');
+  return data;
 }

@@ -14,6 +14,7 @@ interface PreviewPaneProps {
   username: string;
   slug: string;
   previewKey: number;
+  width?: number;
   onRestart: () => void;
   onSendScreenshareFrame: (base64Data: string) => void;
   onRequestFixError: (errorDetails: string) => void;
@@ -23,39 +24,120 @@ export const PreviewPane: React.FC<PreviewPaneProps> = ({
   username,
   slug,
   previewKey,
+  width,
   onRestart,
   onSendScreenshareFrame,
   onRequestFixError,
 }) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const videoElementRef = useRef<HTMLVideoElement | null>(null);
+  const captureIntervalRef = useRef<any>(null);
+
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [visionActive, setVisionActive] = useState(false);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
 
   const previewUrl = `/${encodeURIComponent(username)}/${encodeURIComponent(slug)}/`;
 
-  // Vision screen frame capture timer
-  useEffect(() => {
-    let timer: any = null;
-    if (visionActive) {
-      timer = setInterval(() => {
-        // Capture frame if available or broadcast observation
-        try {
-          const iframe = iframeRef.current;
-          if (iframe && iframe.contentWindow) {
-            // Because iframe is sandboxed without allow-same-origin,
-            // direct canvas drawImage is restricted by browser security.
-            // We notify the vision subsystem or send synthetic frame
-          }
-        } catch (e) {
-          // Expected cross-origin sandbox isolation
-        }
-      }, 1000);
+  const stopVision = () => {
+    if (captureIntervalRef.current) {
+      clearInterval(captureIntervalRef.current);
+      captureIntervalRef.current = null;
     }
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+      mediaStreamRef.current = null;
+    }
+    if (videoElementRef.current) {
+      videoElementRef.current.srcObject = null;
+      videoElementRef.current = null;
+    }
+    setVisionActive(false);
+  };
+
+  const captureFrame = () => {
+    const video = videoElementRef.current;
+    if (!video || video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) {
+      return;
+    }
+
+    try {
+      const canvas = document.createElement('canvas');
+      let w = video.videoWidth;
+      let h = video.videoHeight;
+      const maxDim = 1280;
+      if (w > maxDim || h > maxDim) {
+        if (w > h) {
+          h = Math.round((h * maxDim) / w);
+          w = maxDim;
+        } else {
+          w = Math.round((w * maxDim) / h);
+          h = maxDim;
+        }
+      }
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.drawImage(video, 0, 0, w, h);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+      onSendScreenshareFrame(dataUrl);
+    } catch (err) {
+      console.warn('Frame capture error:', err);
+    }
+  };
+
+  const startVision = async () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+      alert('Screen capture is not supported in this browser.');
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          frameRate: { ideal: 1, max: 2 },
+        },
+        audio: false,
+      });
+      mediaStreamRef.current = stream;
+      const track = stream.getVideoTracks()[0];
+      if (!track) {
+        throw new Error('No video track available');
+      }
+
+      track.onended = () => {
+        stopVision();
+      };
+
+      const video = document.createElement('video');
+      video.srcObject = stream;
+      video.muted = true;
+      video.playsInline = true;
+      await video.play();
+      videoElementRef.current = video;
+
+      setVisionActive(true);
+
+      // Capture initial frame after short delay for video to buffer
+      setTimeout(captureFrame, 200);
+
+      // Bounded 1 FPS capture interval
+      captureIntervalRef.current = setInterval(captureFrame, 1000);
+    } catch (err: any) {
+      if (err.name !== 'NotAllowedError') {
+        console.error('Failed to start vision screen share:', err);
+      }
+      stopVision();
+    }
+  };
+
+  // Cleanup on unmount
+  useEffect(() => {
     return () => {
-      if (timer) clearInterval(timer);
+      stopVision();
     };
-  }, [visionActive]);
+  }, []);
 
   // Listen for postMessage errors from game if instrumented
   useEffect(() => {
@@ -83,7 +165,7 @@ export const PreviewPane: React.FC<PreviewPaneProps> = ({
   return (
     <div
       style={{
-        width: '420px',
+        width: width !== undefined ? `${width}px` : '420px',
         height: '100%',
         backgroundColor: 'var(--bg-base)',
         borderLeft: '1px solid var(--border-subtle)',
@@ -132,7 +214,7 @@ export const PreviewPane: React.FC<PreviewPaneProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           {/* Screen Observation Toggle */}
           <button
-            onClick={() => setVisionActive(!visionActive)}
+            onClick={() => (visionActive ? stopVision() : startVision())}
             title={visionActive ? 'Stop Screen Vision' : 'Enable AI Screen Vision'}
             style={{
               background: visionActive ? 'rgba(56, 189, 248, 0.2)' : 'transparent',

@@ -22,17 +22,31 @@ router = APIRouter(prefix="", tags=["WebSocket"])
 @router.websocket("/ws/studio")
 async def websocket_studio_endpoint(
     websocket: WebSocket,
-    slug: str = Query(...),
-    token: Optional[str] = Query(None)
+    slug: str = Query(...)
 ):
     """
     Authoritative Studio WebSocket connection.
-    Authenticates creator via cookie or query token.
+    Authenticates creator exclusively via secure HttpOnly session cookie and validates origin.
     """
+    # 1. Validate permitted origin
+    origin = websocket.headers.get("origin")
+    allowed_origins = {
+        settings.BASE_URL.rstrip("/"),
+        "http://localhost:5173", "http://localhost:3000",
+        "http://127.0.0.1:5173", "http://127.0.0.1:10000",
+        "http://127.0.0.1:10001", "http://127.0.0.1:10002", "http://127.0.0.1:10003"
+    }
+    if origin:
+        clean_origin = origin.rstrip("/")
+        if clean_origin not in allowed_origins and not (settings.ENVIRONMENT == "development" and ("127.0.0.1" in clean_origin or "localhost" in clean_origin)):
+            logger.warning(f"[WS] Rejected unauthorized WebSocket origin: {origin}")
+            await websocket.close(code=1008)
+            return
+
     await websocket.accept()
 
-    # 1. Authenticate session
-    session_token = websocket.cookies.get(settings.COOKIE_NAME) or token
+    # 2. Authenticate session strictly via HttpOnly cookie (no query params allowed)
+    session_token = websocket.cookies.get(settings.COOKIE_NAME)
     if not session_token:
         await websocket.send_json({"type": "error", "message": "Authentication required for Studio."})
         await websocket.close(code=1008)
@@ -137,9 +151,19 @@ async def websocket_studio_endpoint(
                 if pcm_data:
                     await live_manager.handle_audio_chunk(pcm_data)
 
+            elif msg_type == "start_screenshare":
+                live_manager.screenshare.start()
+                await websocket.send_json({"type": "screenshare_state", "is_active": True})
+
+            elif msg_type == "stop_screenshare":
+                live_manager.screenshare.stop()
+                await websocket.send_json({"type": "screenshare_state", "is_active": False})
+
             elif msg_type == "video_frame":
                 frame_data = data.get("data")
                 if frame_data:
+                    if not live_manager.screenshare.is_active:
+                        live_manager.screenshare.start()
                     await live_manager.handle_video_frame(frame_data)
 
             elif msg_type == "command":

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends
 
 from backend.app.core.errors import AppError, ErrorCategory
 from backend.app.core.security import enforce_rate_limit
-from backend.app.models.schemas import PublishReleaseRequest
+from backend.app.models.schemas import PublishReleaseRequest, RollbackReleaseRequest
 from backend.app.api.routes_auth import require_auth
 from backend.app.database import repositories
 from backend.app.projects import service
@@ -43,19 +43,33 @@ async def api_publish_release(
             "Cannot publish: game entrypoint 'index.html' is missing or empty."
         )
 
-    # 2. Record immutable release in database
+    # 2. Determine sequential version and create immutable filesystem snapshot
     title = req.title or project.get("title", safe_slug)
     description = req.description or project.get("description", "")
-    all_files_list = list(files.keys())
+    existing_releases = await repositories.list_releases(user_id, safe_slug)
+    next_version = (existing_releases[0]["version"] + 1) if existing_releases else 1
 
+    manifest = service.create_release_snapshot(
+        user_id=user_id,
+        slug=safe_slug,
+        version=next_version,
+        title=title,
+        description=description,
+        changelog=req.changelog or f"Release v{next_version}"
+    )
+
+    # 3. Record immutable release in database
     release = await repositories.publish_release(
         user_id=user_id,
         username=username,
         slug=safe_slug,
         title=title,
         description=description,
-        files=all_files_list,
-        changelog=req.changelog or "Initial release"
+        files=manifest["files"],
+        changelog=manifest["changelog"],
+        version=next_version,
+        file_hashes=manifest["file_hashes"],
+        total_bytes=manifest["total_bytes"]
     )
 
     return {
@@ -63,6 +77,28 @@ async def api_publish_release(
         "message": f"Version {release['version']} of '{safe_slug}' published successfully.",
         "release": release,
         "public_url": f"/{username}/{safe_slug}/"
+    }
+
+
+@router.post("/rollback")
+async def api_rollback_release(
+    req: RollbackReleaseRequest,
+    user: dict = Depends(require_auth)
+):
+    """Rolls back the active public release to a prior verified version."""
+    user_id = user["id"]
+    safe_slug = validate_slug(req.slug)
+    enforce_rate_limit("rollback_release", f"{user_id}:{safe_slug}", max_req=10, window_sec=60)
+
+    release = await repositories.rollback_release(user_id, safe_slug, req.target_version)
+    if not release:
+        raise AppError(ErrorCategory.INVALID_INPUT, f"Release version {req.target_version} does not exist.", status_code=404)
+
+    return {
+        "success": True,
+        "message": f"Successfully rolled back '{safe_slug}' to version {req.target_version}.",
+        "active_version": release.get("version", req.target_version),
+        "active_release": release
     }
 
 

@@ -4,19 +4,21 @@ Enforces P0 safety guarantees: tests will NEVER touch production MongoDB Atlas.
 """
 
 from typing import Optional
-from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase, AsyncIOMotorCollection
+from pymongo import AsyncMongoClient
+from pymongo.asynchronous.database import AsyncDatabase
+from pymongo.asynchronous.collection import AsyncCollection
 from backend.app.core.config import settings
 from backend.app.core.logging import logger
 
-db_client: Optional[AsyncIOMotorClient] = None
-db: Optional[AsyncIOMotorDatabase] = None
+db_client: Optional[AsyncMongoClient] = None
+db: Optional[AsyncDatabase] = None
 
 # Collections
-users_col: Optional[AsyncIOMotorCollection] = None
-profiles_col: Optional[AsyncIOMotorCollection] = None
-projects_col: Optional[AsyncIOMotorCollection] = None
-sessions_col: Optional[AsyncIOMotorCollection] = None
-releases_col: Optional[AsyncIOMotorCollection] = None
+users_col: Optional[AsyncCollection] = None
+profiles_col: Optional[AsyncCollection] = None
+projects_col: Optional[AsyncCollection] = None
+sessions_col: Optional[AsyncCollection] = None
+releases_col: Optional[AsyncCollection] = None
 
 
 async def init_db(
@@ -54,7 +56,7 @@ async def init_db(
         return False
 
     try:
-        db_client = AsyncIOMotorClient(target_uri, maxIdleTimeMS=60000)
+        db_client = AsyncMongoClient(target_uri, maxIdleTimeMS=60000)
         db = db_client[target_db_name]
         users_col = db["user_profiles"]
         profiles_col = db["studio_profiles"]
@@ -94,6 +96,6 @@ async def close_db() -> None:
     """Closes the MongoDB client connection cleanly."""
     global db_client, db
     if db_client:
-        db_client.close()
+        await db_client.close()
         db_client = None
         db = None
