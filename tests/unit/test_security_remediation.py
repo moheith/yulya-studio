@@ -53,6 +53,12 @@ def test_production_session_secret_fail_fast():
     s = Settings(ENVIRONMENT="production", SESSION_SECRET=strong_sec)
     assert s.SESSION_SECRET == strong_sec
 
+    # 5. Cloud deployment (Render) without custom secret auto-generates secure ephemeral secret
+    with patch.dict("os.environ", {"RENDER": "true"}, clear=False):
+        cloud_s = Settings(ENVIRONMENT="development", SESSION_SECRET="yulya_studio_secret_key_2026_super_secure")
+        assert len(cloud_s.SESSION_SECRET) >= 32
+        assert cloud_s.SESSION_SECRET != "yulya_studio_secret_key_2026_super_secure"
+
 
 def test_encryption_key_isolation_and_migration():
     """

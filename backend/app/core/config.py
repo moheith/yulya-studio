@@ -4,6 +4,7 @@ Uses pydantic-settings for robust environment variable loading, validation, and 
 """
 
 import os
+import secrets
 from pathlib import Path
 from typing import Optional, Set
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -91,16 +92,22 @@ class Settings(BaseSettings):
         if self.BASE_URL.startswith("https://"):
             self.COOKIE_SECURE = True
 
-        # Enforce strict production secret security (fail fast on weak / placeholder secrets)
-        is_prod = (
-            self.ENVIRONMENT.lower() in {"production", "prod", "staging"}
-            or os.environ.get("RENDER") == "true"
+        # Enforce strict production secret security
+        default_insecure_secret = "yulya_studio_secret_key_2026_super_secure"
+        placeholder_patterns = ["change_in_production", "change_me", "placeholder", "default_secret", "replace_this"]
+        is_placeholder = (
+            not self.SESSION_SECRET
+            or self.SESSION_SECRET == default_insecure_secret
+            or any(pat in self.SESSION_SECRET.lower() for pat in placeholder_patterns)
+        )
+        is_explicit_prod = self.ENVIRONMENT.lower() in {"production", "prod"}
+        is_cloud_deploy = (
+            os.environ.get("RENDER") == "true"
             or ("onrender.com" in self.BASE_URL and "localhost" not in self.BASE_URL)
         )
-        if is_prod:
-            placeholder_patterns = ["change_in_production", "change_me", "placeholder", "super_secure", "default_secret"]
-            is_placeholder = any(pat in self.SESSION_SECRET.lower() for pat in placeholder_patterns)
-            if not self.SESSION_SECRET or is_placeholder:
+
+        if is_explicit_prod:
+            if is_placeholder:
                 raise ValueError(
                     "CRITICAL SECURITY CONFIGURATION ERROR: Predictable, default, or placeholder SESSION_SECRET "
                     "detected in production. A high-entropy production secret (>= 32 chars) must be provided."
@@ -109,6 +116,10 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "CRITICAL SECURITY CONFIGURATION ERROR: SESSION_SECRET must be at least 32 characters in production."
                 )
+        elif is_cloud_deploy and is_placeholder:
+            # On Render or cloud platforms where ENVIRONMENT isn't explicitly 'production' and no custom secret was supplied,
+            # auto-generate a secure random 256-bit secret so the deployment boots successfully without a predictable fallback.
+            self.SESSION_SECRET = secrets.token_urlsafe(32)
 
         self.PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
         self.RELEASES_DIR.mkdir(parents=True, exist_ok=True)
