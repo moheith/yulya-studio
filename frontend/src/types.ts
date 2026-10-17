@@ -12,6 +12,8 @@ export interface Project {
   files: string[];
   tags: string[];
   is_public: boolean;
+  username?: string;
+  user_id?: number;
   updated_at?: string;
   created_at?: string;
   views?: number;

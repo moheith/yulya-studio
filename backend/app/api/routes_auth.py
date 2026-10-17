@@ -184,3 +184,33 @@ async def api_get_me(user: Optional[dict] = Depends(get_current_user)):
         "profile": profile,
         "has_api_key": has_api_key
     }
+
+
+@router.get("/auth/dev-login")
+async def handle_dev_login(request: Request, user_id: int = 99999, username: str = "adithya"):
+    """Development mode one-click login for local testing."""
+    if settings.ENVIRONMENT != "development":
+        raise AppError(ErrorCategory.PERMISSION_DENIED, "Dev login only available in development environment.", status_code=403)
+    
+    token = generate_session_token()
+    user_dict = {
+        "id": user_id,
+        "username": username,
+        "display_name": "Adithya",
+        "avatar": None
+    }
+    await repositories.save_or_update_profile(user_id=user_id, username=username)
+    await repositories.save_session(token, user_dict)
+    
+    resp = RedirectResponse(url="/studio", status_code=302)
+    resp.set_cookie(
+        key=settings.COOKIE_NAME,
+        value=token,
+        max_age=86400 * 30,
+        httponly=True,
+        secure=False,
+        samesite="lax",
+        path="/"
+    )
+    return resp
+

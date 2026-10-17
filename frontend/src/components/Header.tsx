@@ -252,7 +252,7 @@ export const Header: React.FC<HeaderProps> = ({
             {liveState}
           </span>
 
-          {liveState === 'CONNECTED' && (
+          {liveState === 'CONNECTED' ? (
             <button
               onClick={onToggleMute}
               title={isMuted ? 'Microphone Muted (Click to Unmute)' : 'Microphone Live (Click to Mute)'}
@@ -272,7 +272,29 @@ export const Header: React.FC<HeaderProps> = ({
               }}
             >
               {isMuted ? <MicOff size={12} /> : <Mic size={12} />}
-              <span>{isMuted ? 'MUTED' : 'UNMUTED'}</span>
+              <span>{isMuted ? 'MUTED' : 'LIVE'}</span>
+            </button>
+          ) : (
+            <button
+              onClick={onOpenSettings}
+              title="Click to configure Gemini API Key or models"
+              style={{
+                marginLeft: '6px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                backgroundColor: 'rgba(139, 92, 246, 0.15)',
+                border: '1px solid var(--border-subtle)',
+                color: 'var(--accent-primary)',
+                padding: '2px 8px',
+                borderRadius: '12px',
+                cursor: 'pointer',
+                fontSize: '11px',
+                fontWeight: 600,
+              }}
+            >
+              <Sparkles size={11} />
+              <span>AI SETUP</span>
             </button>
           )}
         </div>

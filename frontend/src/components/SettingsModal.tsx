@@ -31,6 +31,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [savingKey, setSavingKey] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState(true);
 
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   const handleSaveApiKey = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!apiKey.trim()) return;
@@ -94,7 +104,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <h2 style={{ fontSize: '18px', fontWeight: 700 }}>Studio Settings</h2>
           </div>
           <button
+            id="close-settings-modal"
             onClick={onClose}
+            title="Close Settings"
             style={{
               background: 'transparent',
               border: 'none',

@@ -31,6 +31,321 @@ import { ArcadeView } from './components/ArcadeView';
 import { PortfolioView } from './components/PortfolioView';
 import { SettingsModal } from './components/SettingsModal';
 import { ToastContainer } from './components/ToastContainer';
+const DEFAULT_STARTER_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Neon Dodge</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="game-container">
+    <canvas id="gameCanvas"></canvas>
+    <div id="hud">
+      <div id="score">SCORE: 0</div>
+      <div id="highScore">HIGH: 0</div>
+    </div>
+    <div id="gameOverScreen" class="overlay hidden">
+      <h1>GAME OVER</h1>
+      <p id="finalScore">Score: 0</p>
+      <button id="restartBtn">Play Again</button>
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>`;
+
+const DEFAULT_STARTER_CSS = `* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background-color: #050110;
+  color: #f0eef6;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  width: 100vw;
+  user-select: none;
+}
+
+#game-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+canvas {
+  background: radial-gradient(circle at center, #11052c 0%, #050110 100%);
+  display: block;
+  box-shadow: 0 0 40px rgba(139, 92, 246, 0.2);
+}
+
+#hud {
+  position: absolute;
+  top: 16px;
+  left: 20px;
+  right: 20px;
+  display: flex;
+  justify-content: space-between;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  font-family: monospace;
+  pointer-events: none;
+  z-index: 10;
+  color: #38bdf8;
+  text-shadow: 0 0 10px rgba(56, 189, 248, 0.6);
+}
+
+.overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(5, 1, 16, 0.85);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  z-index: 20;
+  backdrop-filter: blur(8px);
+}
+
+.overlay.hidden {
+  display: none !important;
+}
+
+.overlay h1 {
+  font-size: 36px;
+  font-weight: 800;
+  color: #f43f5e;
+  text-shadow: 0 0 20px rgba(244, 63, 94, 0.6);
+}
+
+.overlay p {
+  font-size: 18px;
+  color: #9590a8;
+}
+
+.overlay button {
+  padding: 12px 28px;
+  font-size: 14px;
+  font-weight: 600;
+  background: #8b5cf6;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  box-shadow: 0 0 15px rgba(139, 92, 246, 0.4);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.overlay button:hover {
+  background: #7c3aed;
+  transform: translateY(-2px);
+}`;
+
+const DEFAULT_STARTER_JS = `// Neon Dodge - Sandboxed HTML5 Canvas Game
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const scoreEl = document.getElementById('score');
+const highScoreEl = document.getElementById('highScore');
+const gameOverScreen = document.getElementById('gameOverScreen');
+const finalScoreEl = document.getElementById('finalScore');
+const restartBtn = document.getElementById('restartBtn');
+
+let width, height;
+function resize() {
+  width = canvas.width = window.innerWidth;
+  height = canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Player
+const player = {
+  x: width / 2,
+  y: height / 2,
+  radius: 12,
+  speed: 6,
+  vx: 0,
+  vy: 0,
+  color: '#38bdf8'
+};
+
+const keys = {};
+window.addEventListener('keydown', e => { keys[e.code] = true; });
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+
+// Particles & Enemies
+let enemies = [];
+let particles = [];
+let score = 0;
+let highScore = 0;
+let gameOver = false;
+let frameCount = 0;
+
+function spawnEnemy() {
+  const edge = Math.floor(Math.random() * 4);
+  let x, y;
+  if (edge === 0) { x = Math.random() * width; y = -20; }
+  else if (edge === 1) { x = width + 20; y = Math.random() * height; }
+  else if (edge === 2) { x = Math.random() * width; y = height + 20; }
+  else { x = -20; y = Math.random() * height; }
+
+  const angle = Math.atan2(player.y - y, player.x - x);
+  const speed = 2 + Math.random() * 3 + Math.min(score / 500, 4);
+
+  enemies.push({
+    x, y,
+    radius: 8 + Math.random() * 6,
+    vx: Math.cos(angle) * speed,
+    vy: Math.sin(angle) * speed,
+    color: '#f43f5e'
+  });
+}
+
+function createExplosion(x, y, color) {
+  for (let i = 0; i < 20; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 1 + Math.random() * 4;
+    particles.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 30 + Math.random() * 20,
+      maxLife: 50,
+      color
+    });
+  }
+}
+
+function update() {
+  if (gameOver) return;
+
+  // Player movement
+  player.vx = 0;
+  player.vy = 0;
+  if (keys['KeyW'] || keys['ArrowUp']) player.vy -= player.speed;
+  if (keys['KeyS'] || keys['ArrowDown']) player.vy += player.speed;
+  if (keys['KeyA'] || keys['ArrowLeft']) player.vx -= player.speed;
+  if (keys['KeyD'] || keys['ArrowRight']) player.vx += player.speed;
+
+  player.x += player.vx;
+  player.y += player.vy;
+
+  player.x = Math.max(player.radius, Math.min(width - player.radius, player.x));
+  player.y = Math.max(player.radius, Math.min(height - player.radius, player.y));
+
+  frameCount++;
+  if (frameCount % Math.max(20, 60 - Math.floor(score / 100)) === 0) {
+    spawnEnemy();
+  }
+
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    const e = enemies[i];
+    e.x += e.vx;
+    e.y += e.vy;
+
+    const dist = Math.hypot(player.x - e.x, player.y - e.y);
+    if (dist < player.radius + e.radius) {
+      createExplosion(player.x, player.y, player.color);
+      endGame();
+      return;
+    }
+
+    if (e.x < -50 || e.x > width + 50 || e.y < -50 || e.y > height + 50) {
+      enemies.splice(i, 1);
+    }
+  }
+
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.life--;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+
+  score++;
+  scoreEl.innerText = \`SCORE: \${score}\`;
+  if (score > highScore) {
+    highScore = score;
+    highScoreEl.innerText = \`HIGH: \${highScore}\`;
+  }
+}
+
+function render() {
+  ctx.clearRect(0, 0, width, height);
+
+  if (!gameOver) {
+    ctx.shadowBlur = 15;
+    ctx.shadowColor = player.color;
+    ctx.fillStyle = player.color;
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  for (const e of enemies) {
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = e.color;
+    ctx.fillStyle = e.color;
+    ctx.beginPath();
+    ctx.arc(e.x, e.y, e.radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  for (const p of particles) {
+    ctx.shadowBlur = 8;
+    ctx.shadowColor = p.color;
+    ctx.fillStyle = p.color;
+    ctx.globalAlpha = p.life / p.maxLife;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1.0;
+  ctx.shadowBlur = 0;
+}
+
+function loop() {
+  update();
+  render();
+  requestAnimationFrame(loop);
+}
+
+function endGame() {
+  gameOver = true;
+  finalScoreEl.innerText = \`Score: \${score}\`;
+  gameOverScreen.classList.remove('hidden');
+}
+
+function restartGame() {
+  enemies = [];
+  particles = [];
+  score = 0;
+  frameCount = 0;
+  player.x = width / 2;
+  player.y = height / 2;
+  gameOver = false;
+  gameOverScreen.classList.add('hidden');
+}
+
+restartBtn.addEventListener('click', restartGame);
+loop();`;
 
 export const App: React.FC = () => {
   // Navigation & View
@@ -188,6 +503,26 @@ export const App: React.FC = () => {
         }
       } catch (err) {
         addLog('Running in offline / local development mode.', 'warning');
+        const demoProj: Project = {
+          user_id: 0,
+          username: 'demo',
+          slug: 'neon-dodge',
+          title: 'Neon Dodge',
+          description: 'High-speed cyberpunk dodging arcade game',
+          files: ['index.html', 'style.css', 'app.js'],
+          tags: ['game', 'canvas', 'arcade'],
+          is_public: true,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        setProjects([demoProj]);
+        setCurrentProject(demoProj);
+        setFiles({
+          'index.html': DEFAULT_STARTER_HTML,
+          'style.css': DEFAULT_STARTER_CSS,
+          'app.js': DEFAULT_STARTER_JS,
+        });
+        setActiveFile('app.js');
       }
     };
     initData();
@@ -626,10 +961,11 @@ export const App: React.FC = () => {
 
             {/* Right: Live Sandboxed Game Preview */}
             <PreviewPane
-              username={currentUser?.username || 'creator'}
+              username={currentUser?.username || currentProject?.username || 'demo'}
               slug={currentProject?.slug || 'neon-dodge'}
               previewKey={previewKey}
               width={rightWidth}
+              files={files}
               onRestart={() => setPreviewKey((k) => k + 1)}
               onSendScreenshareFrame={(b64) => {
                 if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -693,6 +1029,18 @@ export const App: React.FC = () => {
           onSelectCodeModel={setSelectedCodeModel}
           onClose={() => setSettingsOpen(false)}
           onShowToast={showToast}
+        />
+      )}
+
+      {/* Resizing mouse capture shield: prevents iframes from eating mousemove during splitter dragging */}
+      {resizing && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            cursor: resizing === 'terminal' ? 'row-resize' : 'col-resize',
+          }}
         />
       )}
 

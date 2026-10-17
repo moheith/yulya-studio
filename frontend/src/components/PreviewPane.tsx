@@ -8,6 +8,7 @@ import {
   EyeOff,
   AlertTriangle,
   Wrench,
+  Gamepad2,
 } from 'lucide-react';
 
 interface PreviewPaneProps {
@@ -15,6 +16,7 @@ interface PreviewPaneProps {
   slug: string;
   previewKey: number;
   width?: number;
+  files?: Record<string, string>;
   onRestart: () => void;
   onSendScreenshareFrame: (base64Data: string) => void;
   onRequestFixError: (errorDetails: string) => void;
@@ -25,6 +27,7 @@ export const PreviewPane: React.FC<PreviewPaneProps> = ({
   slug,
   previewKey,
   width,
+  files,
   onRestart,
   onSendScreenshareFrame,
   onRequestFixError,
@@ -38,7 +41,21 @@ export const PreviewPane: React.FC<PreviewPaneProps> = ({
   const [visionActive, setVisionActive] = useState(false);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
 
-  const previewUrl = `/${encodeURIComponent(username)}/${encodeURIComponent(slug)}/`;
+  const inlinedSrcDoc = React.useMemo(() => {
+    if (!files || !files['index.html']) return null;
+    let html = files['index.html'];
+    if (files['style.css']) {
+      html = html.replace(/<link[^>]*href=["']style\.css["'][^>]*>/i, `<style>${files['style.css']}</style>`);
+    }
+    if (files['app.js']) {
+      html = html.replace(/<script[^>]*src=["']app\.js["'][^>]*><\/script>/i, `<script>${files['app.js']}</script>`);
+    }
+    return html;
+  }, [files]);
+
+  const hasProject = Boolean(slug && (username || inlinedSrcDoc));
+  const useInlined = Boolean(inlinedSrcDoc && (username === 'demo' || !username));
+  const previewUrl = hasProject && !useInlined ? `/${encodeURIComponent(username)}/${encodeURIComponent(slug)}/` : '';
 
   const stopVision = () => {
     if (captureIntervalRef.current) {
@@ -286,21 +303,59 @@ export const PreviewPane: React.FC<PreviewPaneProps> = ({
 
       {/* Sandboxed Game Iframe Area */}
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
-        <iframe
-          key={previewKey}
-          ref={iframeRef}
-          src={previewUrl}
-          title="Game Live Preview"
-          // Strictly sandboxed: allow-scripts ONLY, no allow-same-origin (Section 27)
-          sandbox="allow-scripts"
-          style={{
-            width: '100%',
-            height: '100%',
-            border: 'none',
-            display: 'block',
-            backgroundColor: '#050110',
-          }}
-        />
+        {!hasProject ? (
+          <div
+            style={{
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '24px',
+              textAlign: 'center',
+              gap: '14px',
+            }}
+          >
+            <div
+              style={{
+                width: '52px',
+                height: '52px',
+                borderRadius: '12px',
+                backgroundColor: 'rgba(139, 92, 246, 0.1)',
+                border: '1px solid var(--border-active)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 0 24px rgba(139, 92, 246, 0.15)',
+              }}
+            >
+              <Gamepad2 size={26} color="var(--accent-primary)" />
+            </div>
+            <div style={{ fontWeight: 700, fontSize: '15px', color: 'var(--text-primary)' }}>
+              Interactive Preview Ready
+            </div>
+            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', maxWidth: '240px', lineHeight: '1.5' }}>
+              Select a project from the top dropdown or ask Yulya to create a new game.
+            </div>
+          </div>
+        ) : (
+          <iframe
+            key={previewKey}
+            ref={iframeRef}
+            src={useInlined ? undefined : previewUrl}
+            srcDoc={useInlined ? (inlinedSrcDoc || undefined) : undefined}
+            title="Game Live Preview"
+            // Strictly sandboxed: allow-scripts ONLY, no allow-same-origin (Section 27)
+            sandbox="allow-scripts"
+            style={{
+              width: '100%',
+              height: '100%',
+              border: 'none',
+              display: 'block',
+              backgroundColor: '#050110',
+            }}
+          />
+        )}
 
         {/* Contained Preview Error Overlay */}
         {runtimeError && (

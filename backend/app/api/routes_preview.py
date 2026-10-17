@@ -89,9 +89,10 @@ async def handle_game_index(request: Request, username: str, slug: str):
         _apply_preview_security_headers(resp, mode="published", version=version)
         return resp
 
-    # 2. No active release: Only authenticated project owner can preview private draft
+    # 2. No active release: Allow public preview if is_public=True, or owner if private draft
     current_user = await get_current_user(request)
-    if not current_user or current_user.get("id") != user_id:
+    is_owner = bool(current_user and current_user.get("id") == user_id)
+    if not project.get("is_public", False) and not is_owner:
         raise AppError(
             ErrorCategory.PERMISSION_DENIED,
             "This game draft is private and has not yet been published by the creator.",
@@ -135,7 +136,8 @@ async def handle_game_asset(request: Request, username: str, slug: str, file_pat
     else:
         # Check authentication for draft
         current_user = await get_current_user(request)
-        if not current_user or current_user.get("id") != user_id:
+        is_owner = bool(current_user and current_user.get("id") == user_id)
+        if not project.get("is_public", False) and not is_owner:
             raise AppError(
                 ErrorCategory.PERMISSION_DENIED,
                 "This game draft is private and has not yet been published.",
